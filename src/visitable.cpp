@@ -26,7 +26,17 @@
 #include "colony.h"
 #include "point.h"
 
-const efftype_id effect_riding( "riding" );
+static const quality_id qual_BUTCHER( "BUTCHER" );
+
+static const trait_id trait_CLAWS( "CLAWS" );
+static const trait_id trait_CLAWS_RAT( "CLAWS_RAT" );
+static const trait_id trait_CLAWS_RETRACT( "CLAWS_RETRACT" );
+static const trait_id trait_CLAWS_ST( "CLAWS_ST" );
+static const trait_id trait_MANDIBLES( "MANDIBLES" );
+static const trait_id trait_TALONS( "TALONS" );
+
+static const bionic_id bio_tools( "bio_tools" );
+static const bionic_id bio_ups( "bio_ups" );
 
 /** @relates visitable */
 template <typename T>
@@ -118,7 +128,8 @@ static int has_quality_internal( const T &self, const quality_id &qual, int leve
         if( e->get_quality( qual ) >= level ) {
             qty = sum_no_wrap( qty, static_cast<int>( e->count() ) );
             if( qty >= limit ) {
-                return VisitResponse::ABORT; // found sufficient items
+                // found sufficient items
+                return VisitResponse::ABORT;
             }
         }
         return VisitResponse::NEXT;
@@ -260,13 +271,12 @@ int visitable<Character>::max_quality( const quality_id &qual ) const
         res = std::max( res, bio.get_quality( qual ) );
     }
 
-    static const quality_id BUTCHER( "BUTCHER" );
-    if( qual == BUTCHER ) {
-        if( self->has_trait( trait_id( "CLAWS_ST" ) ) ) {
+    if( qual == qual_BUTCHER ) {
+        if( self->has_trait( trait_CLAWS_ST ) ) {
             res = std::max( res, 8 );
-        } else if( self->has_trait( trait_id( "TALONS" ) ) || self->has_trait( trait_id( "MANDIBLES" ) ) ||
-                   self->has_trait( trait_id( "CLAWS" ) ) || self->has_trait( trait_id( "CLAWS_RETRACT" ) ) ||
-                   self->has_trait( trait_id( "CLAWS_RAT" ) ) ) {
+        } else if( self->has_trait( trait_TALONS ) || self->has_trait( trait_MANDIBLES ) ||
+                   self->has_trait( trait_CLAWS ) || self->has_trait( trait_CLAWS_RETRACT ) ||
+                   self->has_trait( trait_CLAWS_RAT ) ) {
             res = std::max( res, 4 );
         }
     }
@@ -533,7 +543,8 @@ std::list<item> visitable<item>::remove_items_with( const std::function<bool( co
     std::list<item> res;
 
     if( count <= 0 ) {
-        return res; // nothing to do
+        // nothing to do
+        return res;
     }
 
     remove_internal( filter, *it, count, res );
@@ -549,7 +560,8 @@ std::list<item> visitable<inventory>::remove_items_with( const
     std::list<item> res;
 
     if( count <= 0 ) {
-        return res; // nothing to do
+        // nothing to do
+        return res;
     }
 
     for( auto stack = inv->items.begin(); stack != inv->items.end() && count > 0; ) {
@@ -580,6 +592,10 @@ std::list<item> visitable<inventory>::remove_items_with( const
             ++stack;
         }
     }
+
+    // Invalidate binning cache
+    inv->binned = false;
+
     return res;
 }
 
@@ -592,7 +608,8 @@ std::list<item> visitable<Character>::remove_items_with( const
     std::list<item> res;
 
     if( count <= 0 ) {
-        return res; // nothing to do
+        // nothing to do
+        return res;
     }
 
     // first try and remove items from the inventory
@@ -639,7 +656,8 @@ std::list<item> visitable<map_cursor>::remove_items_with( const
     std::list<item> res;
 
     if( count <= 0 ) {
-        return res; // nothing to do
+        // nothing to do
+        return res;
     }
 
     if( !g->m.inbounds( *cur ) ) {
@@ -650,9 +668,9 @@ std::list<item> visitable<map_cursor>::remove_items_with( const
     // fetch the appropriate item stack
     point offset;
     submap *sub = g->m.get_submap_at( *cur, offset );
+    cata::colony<item> &stack = sub->get_items( offset );
 
-    for( auto iter = sub->itm[ offset.x ][ offset.y ].begin();
-         iter != sub->itm[ offset.x ][ offset.y ].end(); ) {
+    for( auto iter = stack.begin(); iter != stack.end(); ) {
         if( filter( *iter ) ) {
             // remove from the active items cache (if it isn't there does nothing)
             sub->active_items.remove( &*iter );
@@ -662,7 +680,7 @@ std::list<item> visitable<map_cursor>::remove_items_with( const
 
             // finally remove the item
             res.push_back( *iter );
-            iter = sub->itm[ offset.x ][ offset.y ].erase( iter );
+            iter = stack.erase( iter );
 
             if( --count == 0 ) {
                 return res;
@@ -704,7 +722,8 @@ std::list<item> visitable<vehicle_cursor>::remove_items_with( const
     std::list<item> res;
 
     if( count <= 0 ) {
-        return res; // nothing to do
+        // nothing to do
+        return res;
     }
 
     int idx = cur->veh.part_with_feature( cur->part, "CARGO", false );
@@ -846,8 +865,8 @@ int visitable<Character>::charges_of( const std::string &what, int limit,
     auto p = dynamic_cast<const player *>( self );
 
     if( what == "toolset" ) {
-        if( p && p->has_active_bionic( bionic_id( "bio_tools" ) ) ) {
-            return std::min( p->power_level, limit );
+        if( p && p->has_active_bionic( bio_tools ) ) {
+            return std::min( units::to_kilojoule( p->get_power_level() ), limit );
         } else {
             return 0;
         }
@@ -857,8 +876,8 @@ int visitable<Character>::charges_of( const std::string &what, int limit,
         int qty = 0;
         qty = sum_no_wrap( qty, charges_of( "UPS_off" ) );
         qty = sum_no_wrap( qty, static_cast<int>( charges_of( "adv_UPS_off" ) / 0.6 ) );
-        if( p && p->has_active_bionic( bionic_id( "bio_ups" ) ) ) {
-            qty = sum_no_wrap( qty, p->power_level );
+        if( p && p->has_active_bionic( bio_ups ) ) {
+            qty = sum_no_wrap( qty, units::to_kilojoule( p->get_power_level() ) );
         }
         if( p && p->is_mounted() ) {
             auto mons = p->mounted_creature.get();
@@ -929,7 +948,7 @@ int visitable<Character>::amount_of( const std::string &what, bool pseudo, int l
 {
     auto self = static_cast<const Character *>( this );
 
-    if( what == "toolset" && pseudo && self->has_active_bionic( bionic_id( "bio_tools" ) ) ) {
+    if( what == "toolset" && pseudo && self->has_active_bionic( bio_tools ) ) {
         return 1;
     }
 

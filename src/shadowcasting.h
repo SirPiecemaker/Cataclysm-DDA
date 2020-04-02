@@ -10,6 +10,7 @@
 
 #include "game_constants.h"
 #include "lightmap.h"
+#include "point.h"
 
 struct tripoint;
 
@@ -106,17 +107,20 @@ template<typename T, typename Out, T( *calc )( const T &, const T &, const int &
          T( *accumulate )( const T &, const T &, const int & )>
 void castLightAll( Out( &output_cache )[MAPSIZE_X][MAPSIZE_Y],
                    const T( &input_array )[MAPSIZE_X][MAPSIZE_Y],
-                   int offsetX, int offsetY, int offsetDistance = 0,
+                   const point &offset, int offsetDistance = 0,
                    T numerator = 1.0 );
+
+template<typename T>
+using array_of_grids_of = std::array<T( * )[MAPSIZE_X][MAPSIZE_Y], OVERMAP_LAYERS>;
 
 // TODO: Generalize the floor check, allow semi-transparent floors
 template< typename T, T( *calc )( const T &, const T &, const int & ),
           bool( *check )( const T &, const T & ),
           T( *accumulate )( const T &, const T &, const int & ) >
 void cast_zlight(
-    const std::array<T( * )[MAPSIZE_X][MAPSIZE_Y], OVERMAP_LAYERS> &output_caches,
-    const std::array<const T( * )[MAPSIZE_X][MAPSIZE_Y], OVERMAP_LAYERS> &input_arrays,
-    const std::array<const bool ( * )[MAPSIZE_X][MAPSIZE_Y], OVERMAP_LAYERS> &floor_caches,
+    const array_of_grids_of<T> &output_caches,
+    const array_of_grids_of<const T> &input_arrays,
+    const array_of_grids_of<const bool> &floor_caches,
     const tripoint &origin, int offset_distance, T numerator );
 
 #endif

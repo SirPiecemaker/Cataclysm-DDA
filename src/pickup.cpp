@@ -30,6 +30,7 @@
 #include "string_input_popup.h"
 #include "translations.h"
 #include "ui.h"
+#include "ui_manager.h"
 #include "vehicle.h"
 #include "vehicle_selector.h"
 #include "vpart_position.h"
@@ -171,6 +172,48 @@ static pickup_answer handle_problematic_pickup( const item &it, bool &offered_sw
     return static_cast<pickup_answer>( choice );
 }
 
+bool Pickup::query_thief()
+{
+    player &u = g->u;
+    const bool force_uc = get_option<bool>( "FORCE_CAPITAL_YN" );
+    const auto &allow_key = force_uc ? input_context::disallow_lower_case
+                            : input_context::allow_all_keys;
+    std::string answer = query_popup()
+                         .allow_cancel( false )
+                         .context( "YES_NO_ALWAYS_NEVER" )
+                         .message( "%s", force_uc
+                                   ? _( "Picking up this item will be considered stealing, continue?  (Case sensitive)" )
+                                   : _( "Picking up this item will be considered stealing, continue?" ) )
+                         .option( "YES", allow_key ) // yes, steal all items in this location that is selected
+                         .option( "NO", allow_key ) // no, pick up only what is free
+                         .option( "ALWAYS", allow_key ) // Yes, steal all items and stop asking me this question
+                         .option( "NEVER", allow_key ) // no, only grab free item and never ask me again
+                         .cursor( 1 ) // default to the second option `NO`
+                         .query()
+                         .action; // retrieve the input action
+    if( answer == "YES" ) {
+        u.set_value( "THIEF_MODE", "THIEF_STEAL" );
+        u.set_value( "THIEF_MODE_KEEP", "NO" );
+        return true;
+    } else if( answer == "NO" ) {
+        u.set_value( "THIEF_MODE", "THIEF_HONEST" );
+        u.set_value( "THIEF_MODE_KEEP", "NO" );
+        return false;
+    } else if( answer == "ALWAYS" ) {
+        u.set_value( "THIEF_MODE", "THIEF_STEAL" );
+        u.set_value( "THIEF_MODE_KEEP", "YES" );
+        return true;
+    } else if( answer == "NEVER" ) {
+        u.set_value( "THIEF_MODE", "THIEF_HONEST" );
+        u.set_value( "THIEF_MODE_KEEP", "YES" );
+        return false;
+    } else {
+        // error
+        debugmsg( "Not a valid option [ %s ]", answer );
+    }
+    return false;
+}
+
 // Returns false if pickup caused a prompt and the player selected to cancel pickup
 bool pick_one_up( item_location &loc, int quantity, bool &got_water, bool &offered_swap,
                   PickupMap &mapPickup, bool autopickup )
@@ -191,43 +234,10 @@ bool pick_one_up( item_location &loc, int quantity, bool &got_water, bool &offer
 
     const auto wield_check = u.can_wield( newit );
 
-    if( newit.has_owner() &&
-        newit.get_owner() != g->faction_manager_ptr->get( faction_id( "your_followers" ) ) ) {
+    if( !newit.is_owned_by( g->u, true ) ) {
         // Has the player given input on if stealing is ok?
         if( u.get_value( "THIEF_MODE" ) == "THIEF_ASK" ) {
-            bool force_uc = get_option<bool>( "FORCE_CAPITAL_YN" );
-            const auto allow_key = [force_uc]( const input_event & evt ) {
-                return !force_uc || evt.type != CATA_INPUT_KEYBOARD ||
-                       // std::lower is undefined outside unsigned char range
-                       evt.get_first_input() < 'a' || evt.get_first_input() > 'z';
-            };
-            std::string answer = query_popup()
-                                 .context( "YES_NO_ALWAYS_NEVER" )
-                                 .message( "%s",
-                                           _( "Picking up this item will be considered stealing, continue?" ) )
-                                 .option( "YES", allow_key ) // yes, steal all items in this location that is selected
-                                 .option( "NO", allow_key ) // no, pick up only what is free
-                                 .option( "ALWAYS", allow_key ) // Yes, steal all items and stop asking me this question
-                                 .option( "NEVER", allow_key ) // no, only grab free item and never ask me again
-                                 .cursor( 1 ) // default to the third option `QUIT`
-                                 .query()
-                                 .action; // retrieve the input action
-            if( answer == "YES" ) {
-                u.set_value( "THIEF_MODE", "THIEF_STEAL" );
-                u.set_value( "THIEF_MODE_KEEP", "NO" );
-            } else if( answer == "NO" ) {
-                u.set_value( "THIEF_MODE", "THIEF_HONEST" );
-                u.set_value( "THIEF_MODE_KEEP", "NO" );
-            } else if( answer == "ALWAYS" ) {
-                u.set_value( "THIEF_MODE", "THIEF_STEAL" );
-                u.set_value( "THIEF_MODE_KEEP", "YES" );
-            } else if( answer == "NEVER" ) {
-                u.set_value( "THIEF_MODE", "THIEF_HONEST" );
-                u.set_value( "THIEF_MODE_KEEP", "YES" );
-            } else {
-                // error
-                debugmsg( "Not a valid option [ %s ]", answer );
-            }
+            Pickup::query_thief();
         }
         if( u.get_value( "THIEF_MODE" ) == "THIEF_HONEST" ) {
             return true; // Since we are honest, return no problem before picking up
@@ -306,6 +316,9 @@ bool pick_one_up( item_location &loc, int quantity, bool &got_water, bool &offer
             if( wield_check.success() ) {
                 //using original item, possibly modifying it
                 picked_up = u.wield( it );
+                if( picked_up ) {
+                    u.weapon.charges = newit.charges;
+                }
                 if( u.weapon.invlet ) {
                     add_msg( m_info, _( "Wielding %c - %s" ), u.weapon.invlet,
                              u.weapon.display_name() );
@@ -494,6 +507,7 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
             g->u.activity.targets.emplace_back( vehicle_cursor( *veh, cargo_part ), &*here.front() );
         } else {
             g->u.activity.targets.emplace_back( map_cursor( p ), &*here.front() );
+            g->u.activity.coords.push_back( g->u.pos() );
         }
         // auto-pickup means pick up all.
         g->u.activity.values.push_back( 0 );
@@ -555,6 +569,15 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
         int pickupH = maxitems + pickupBorderRows;
         int pickupW = 44;
 
+        //find max length of item name and resize pickup window width
+        for( const std::list<item_stack::iterator> &cur_list : stacked_here ) {
+            const item &this_item = *cur_list.front();
+            int item_len = utf8_width( remove_color_tags( this_item.display_name() ) ) + 10;
+            if( item_len > pickupW && item_len < TERMX ) {
+                pickupW = item_len;
+            }
+        }
+
         int itemsW = pickupW;
 
         int pickupX = 0;
@@ -580,13 +603,13 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
         ctxt.register_action( "DOWN" );
         ctxt.register_action( "RIGHT" );
         ctxt.register_action( "LEFT" );
-        ctxt.register_action( "NEXT_TAB", translate_marker( "Next page" ) );
-        ctxt.register_action( "PREV_TAB", translate_marker( "Previous page" ) );
+        ctxt.register_action( "NEXT_TAB", to_translation( "Next page" ) );
+        ctxt.register_action( "PREV_TAB", to_translation( "Previous page" ) );
         ctxt.register_action( "SCROLL_UP" );
         ctxt.register_action( "SCROLL_DOWN" );
         ctxt.register_action( "CONFIRM" );
         ctxt.register_action( "SELECT_ALL" );
-        ctxt.register_action( "QUIT", translate_marker( "Cancel" ) );
+        ctxt.register_action( "QUIT", to_translation( "Cancel" ) );
         ctxt.register_action( "ANY_INPUT" );
         ctxt.register_action( "HELP_KEYBINDINGS" );
         ctxt.register_action( "FILTER" );
@@ -601,6 +624,7 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
         int selected = 0;
         int iScrollPos = 0;
 
+        std::string clear_buffer( pickupW, ' ' );
         std::string filter;
         std::string new_filter;
         // Indexes of items that match the filter
@@ -609,16 +633,22 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
         if( g->was_fullscreen ) {
             g->draw_ter();
         }
+
+        // FIXME: temporarily disable redrawing of lower UIs before this UI is migrated to `ui_adaptor`
+        ui_adaptor ui( ui_adaptor::disable_uis_below {} );
+
         // Now print the two lists; those on the ground and about to be added to inv
         // Continue until we hit return or space
         do {
             const std::string pickup_chars =
                 ctxt.get_available_single_char_hotkeys( "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ:;" );
             int idx = -1;
-            for( int i = 1; i < pickupH; i++ ) {
-                mvwprintw( w_pickup, point( 0, i ),
-                           "                                                " );
+
+            //clear all items names
+            for( int cur_row = 1; cur_row < pickupH; cur_row++ ) {
+                mvwprintw( w_pickup, point( 0, cur_row ), clear_buffer );
             }
+
             if( action == "ANY_INPUT" &&
                 raw_input_char >= '0' && raw_input_char <= '9' ) {
                 int raw_input_char_value = static_cast<char>( raw_input_char ) - '0';
@@ -775,12 +805,19 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
                 std::vector<iteminfo> vDummy;
                 selected_item.info( true, vThisItem );
 
-                draw_item_info( w_item_info, "", "", vThisItem, vDummy, iScrollPos, true, true );
+                item_info_data dummy( "", "", vThisItem, vDummy, iScrollPos );
+                dummy.without_getch = true;
+                dummy.without_border = true;
+
+                draw_item_info( w_item_info, dummy );
             }
             draw_custom_border( w_item_info, 0 );
+
+            // print info window title: < item name >
             mvwprintw( w_item_info, point( 2, 0 ), "< " );
-            trim_and_print( w_item_info, point( 4, 0 ), itemsW - 8, c_white, "%s >",
+            trim_and_print( w_item_info, point( 4, 0 ), itemsW - 8, selected_item.color_in_inventory(),
                             selected_item.display_name() );
+            wprintw( w_item_info, " >" );
             wrefresh( w_item_info );
 
             if( action == "SELECT_ALL" ) {
@@ -833,15 +870,6 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
                         wprintw( w_pickup, " - " );
                     }
                     std::string item_name;
-                    std::string stolen;
-                    bool stealing = false;
-                    if( this_item.has_owner() ) {
-                        const faction *item_fac = this_item.get_owner();
-                        if( item_fac != g->u.get_faction() ) {
-                            stolen = "<color_light_red>!</color>";
-                            stealing = true;
-                        }
-                    }
                     if( stacked_here[true_it].front()->is_money() ) {
                         //Count charges
                         // TODO: transition to the item_location system used for the inventory
@@ -860,41 +888,25 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
                                  it != stacked_here[true_it].end() && c > 0; ++it, --c ) {
                                 charges += ( *it )->charges;
                             }
-                            if( stealing ) {
-                                //~ %s %s of %s ""!20 Cash Cards of $200" - ! added if stealing.
-                                item_name = string_format( _( "%s %s of %s" ), stolen,
-                                                           stacked_here[true_it].front()->display_money( getitem[true_it].count, charges ),
-                                                           format_money( charges_total ) );
-                            } else {
-                                item_name = string_format( _( "%s of %s" ),
-                                                           stacked_here[true_it].front()->display_money( getitem[true_it].count, charges ),
-                                                           format_money( charges_total ) );
-                            }
+                            item_name = stacked_here[true_it].front()->display_money( getitem[true_it].count, charges_total,
+                                        charges );
                         }
                     } else {
-                        if( stealing ) {
-                            item_name = string_format( "%s %s", stolen,
-                                                       this_item.display_name( stacked_here[true_it].size() ) );
-                        } else {
-                            item_name = this_item.display_name( stacked_here[true_it].size() );
-                        }
+                        item_name = this_item.display_name( stacked_here[true_it].size() );
                     }
                     if( stacked_here[true_it].size() > 1 ) {
-                        if( stealing ) {
-                            item_name = string_format( "%s %d %s", stolen, stacked_here[true_it].size(), item_name );
-                        } else {
-                            item_name = string_format( "%d %s", stacked_here[true_it].size(), item_name );
-                        }
+                        item_name = string_format( "%d %s", stacked_here[true_it].size(), item_name );
                     }
                     if( get_option<bool>( "ITEM_SYMBOLS" ) ) {
-                        if( stealing ) {
-                            item_name = string_format( "%s %s %s", stolen, this_item.symbol().c_str(),
-                                                       item_name.c_str() );
-                        } else {
-                            item_name = string_format( "%s %s", this_item.symbol().c_str(),
-                                                       item_name );
-                        }
+                        item_name = string_format( "%s %s", this_item.symbol().c_str(),
+                                                   item_name );
                     }
+
+                    // if the item does not belong to your fraction then add the stolen symbol
+                    if( !this_item.is_owned_by( g->u, true ) ) {
+                        item_name = string_format( "<color_light_red>!</color> %s", item_name );
+                    }
+
                     trim_and_print( w_pickup, point( 6, 1 + ( cur_it % maxitems ) ), pickupW - 4, icolor,
                                     item_name );
                 }
@@ -948,8 +960,8 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
                 wprintz( w_pickup, c_white, "/%.1f", round_up( convert_weight( g->u.weight_capacity() ), 1 ) );
 
                 std::string fmted_volume_predict = format_volume( volume_predict );
-                mvwprintz( w_pickup, point( 18, 0 ), volume_predict > g->u.volume_capacity() ? c_red : c_white,
-                           _( "Vol %s" ), fmted_volume_predict );
+                wprintz( w_pickup, volume_predict > g->u.volume_capacity() ? c_red : c_white, _( "  Vol %s" ),
+                         fmted_volume_predict );
 
                 std::string fmted_volume_capacity = format_volume( g->u.volume_capacity() );
                 wprintz( w_pickup, c_white, "/%s", fmted_volume_capacity );
@@ -981,6 +993,7 @@ void Pickup::pick_up( const tripoint &p, int min, from_where get_items_from )
 
     // At this point we've selected our items, register an activity to pick them up.
     g->u.assign_activity( activity_id( "ACT_PICKUP" ) );
+    g->u.activity.coords.push_back( g->u.pos() );
     if( min == -1 ) {
         // Auto pickup will need to auto resume since there can be several of them on the stack.
         g->u.activity.auto_resume = true;

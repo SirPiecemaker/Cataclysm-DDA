@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <tuple>
 #include <set>
-#include <sstream>
 
 #include "avatar.h"
 #include "cata_utility.h"
@@ -53,7 +52,6 @@
 #include "calendar.h"
 #include "character.h"
 #include "color.h"
-#include "creature.h"
 #include "cursesdef.h"
 #include "int_id.h"
 #include "map_memory.h"
@@ -67,7 +65,10 @@
 
 #define dbg(x) DebugLog((x),D_SDL) << __FILE__ << ":" << __LINE__ << ": "
 
+static const efftype_id effect_ridden( "ridden" );
+
 static const std::string ITEM_HIGHLIGHT( "highlight_item" );
+static const std::string ZOMBIE_REVIVAL_INDICATOR( "zombie_revival_indicator" );
 
 static const std::array<std::string, 8> multitile_keys = {{
         "center",
@@ -83,8 +84,6 @@ static const std::array<std::string, 8> multitile_keys = {{
 
 extern int fontwidth;
 extern int fontheight;
-const efftype_id effect_ridden( "ridden" );
-const efftype_id effect_riding( "riding" );
 static const std::string empty_string;
 static const std::array<std::string, 12> TILE_CATEGORY_IDS = {{
         "", // C_NONE,
@@ -176,7 +175,7 @@ formatted_text::formatted_text( const std::string &text, const int color,
 
 cata_tiles::cata_tiles( const SDL_Renderer_Ptr &renderer ) :
     renderer( renderer ),
-    minimap( new pixel_minimap( renderer ) )
+    minimap( renderer )
 {
     assert( renderer );
 
@@ -264,8 +263,8 @@ void cata_tiles::reinit()
 static void get_tile_information( const std::string &config_path, std::string &json_path,
                                   std::string &tileset_path )
 {
-    const std::string default_json = FILENAMES["defaulttilejson"];
-    const std::string default_tileset = FILENAMES["defaulttilepng"];
+    const std::string default_json = PATH_INFO::defaulttilejson();
+    const std::string default_tileset = PATH_INFO::defaulttilepng();
 
     // Get JSON and TILESET vars from config
     const auto reader = [&]( std::istream & fin ) {
@@ -275,7 +274,8 @@ static void get_tile_information( const std::string &config_path, std::string &j
 
             if( sOption.empty() ) {
                 getline( fin, sOption );
-            } else if( sOption[0] == '#' ) { // Skip comment
+            } else if( sOption[0] == '#' ) {
+                // Skip comment
                 getline( fin, sOption );
             } else if( sOption.find( "JSON" ) != std::string::npos ) {
                 fin >> json_path;
@@ -516,13 +516,13 @@ void tileset_loader::load( const std::string &tileset_id, const bool precheck )
     if( tset_iter != TILESETS.end() ) {
         tileset_root = tset_iter->second;
         dbg( D_INFO ) << '"' << tileset_id << '"' << " tileset: found config file path: " << tileset_root;
-        get_tile_information( tileset_root + '/' + FILENAMES["tileset-conf"],
+        get_tile_information( tileset_root + '/' + PATH_INFO::tileset_conf(),
                               json_conf, tileset_path );
         dbg( D_INFO ) << "Current tileset is: " << tileset_id;
     } else {
         dbg( D_ERROR ) << "Tileset \"" << tileset_id << "\" from options is invalid";
-        json_conf = FILENAMES["defaulttilejson"];
-        tileset_path = FILENAMES["defaulttilepng"];
+        json_conf = PATH_INFO::defaulttilejson();
+        tileset_path = PATH_INFO::defaulttilepng();
     }
 
     std::string json_path = tileset_root + '/' + json_conf;
@@ -543,9 +543,7 @@ void tileset_loader::load( const std::string &tileset_id, const bool precheck )
         config.throw_error( "\"tile_info\" missing" );
     }
 
-    JsonArray info = config.get_array( "tile_info" );
-    while( info.has_more() ) {
-        JsonObject curr_info = info.next_object();
+    for( const JsonObject &curr_info : config.get_array( "tile_info" ) ) {
         ts.tile_height = curr_info.get_int( "height" );
         ts.tile_width = curr_info.get_int( "width" );
         tile_iso = curr_info.get_bool( "iso", false );
@@ -582,9 +580,7 @@ void tileset_loader::load( const std::string &tileset_id, const bool precheck )
 
         int num_in_file = 1;
         if( mod_config_json.test_array() ) {
-            JsonArray mod_config_array = mod_config_json.get_array();
-            while( mod_config_array.has_more() ) {
-                JsonObject mod_config = mod_config_array.next_object();
+            for( const JsonObject &mod_config : mod_config_json.get_array() ) {
                 if( mod_config.get_string( "type" ) == "mod_tileset" ) {
                     if( num_in_file == mts.num_in_file() ) {
                         load_internal( mod_config, tileset_root, img_path );
@@ -601,7 +597,8 @@ void tileset_loader::load( const std::string &tileset_id, const bool precheck )
 
     // loop through all tile ids and eliminate empty/invalid things
     for( auto it = ts.tile_ids.begin(); it != ts.tile_ids.end(); ) {
-        auto &td = it->second;        // second is the tile_type describing that id
+        // second is the tile_type describing that id
+        auto &td = it->second;
         process_variations_after_loading( td.fg );
         process_variations_after_loading( td.bg );
         // All tiles need at least foreground or background data, otherwise they are useless.
@@ -621,16 +618,14 @@ void tileset_loader::load( const std::string &tileset_id, const bool precheck )
     ts.tileset_id = tileset_id;
 }
 
-void tileset_loader::load_internal( JsonObject &config, const std::string &tileset_root,
+void tileset_loader::load_internal( const JsonObject &config, const std::string &tileset_root,
                                     const std::string &img_path )
 {
     if( config.has_array( "tiles-new" ) ) {
         // new system, several entries
         // When loading multiple tileset images this defines where
         // the tiles from the most recently loaded image start from.
-        JsonArray tiles_new = config.get_array( "tiles-new" );
-        while( tiles_new.has_more() ) {
-            JsonObject tile_part_def = tiles_new.next_object();
+        for( const JsonObject &tile_part_def : config.get_array( "tiles-new" ) ) {
             const std::string tileset_image_path = tileset_root + '/' + tile_part_def.get_string( "file" );
             R = -1;
             G = -1;
@@ -723,19 +718,17 @@ void tileset_loader::add_ascii_subtile( tile_type &curr_tile, const std::string 
     ts.create_tile_type( m_id, std::move( curr_subtile ) );
 }
 
-void tileset_loader::load_ascii( JsonObject &config )
+void tileset_loader::load_ascii( const JsonObject &config )
 {
     if( !config.has_member( "ascii" ) ) {
         config.throw_error( "\"ascii\" section missing" );
     }
-    JsonArray ascii = config.get_array( "ascii" );
-    while( ascii.has_more() ) {
-        JsonObject entry = ascii.next_object();
+    for( const JsonObject &entry : config.get_array( "ascii" ) ) {
         load_ascii_set( entry );
     }
 }
 
-void tileset_loader::load_ascii_set( JsonObject &entry )
+void tileset_loader::load_ascii_set( const JsonObject &entry )
 {
     // tile for ASCII char 0 is at `in_image_offset`,
     // the other ASCII chars follow from there.
@@ -844,16 +837,13 @@ void tileset_loader::load_ascii_set( JsonObject &entry )
     }
 }
 
-void tileset_loader::load_tilejson_from_file( JsonObject &config )
+void tileset_loader::load_tilejson_from_file( const JsonObject &config )
 {
     if( !config.has_member( "tiles" ) ) {
         config.throw_error( "\"tiles\" section missing" );
     }
 
-    JsonArray tiles = config.get_array( "tiles" );
-    while( tiles.has_more() ) {
-        JsonObject entry = tiles.next_object();
-
+    for( const JsonObject &entry : config.get_array( "tiles" ) ) {
         std::vector<std::string> ids;
         if( entry.has_string( "id" ) ) {
             ids.push_back( entry.get_string( "id" ) );
@@ -868,9 +858,7 @@ void tileset_loader::load_tilejson_from_file( JsonObject &config )
             int t_h3d = entry.get_int( "height_3d", 0 );
             if( t_multi ) {
                 // fetch additional tiles
-                JsonArray subentries = entry.get_array( "additional_tiles" );
-                while( subentries.has_more() ) {
-                    JsonObject subentry = subentries.next_object();
+                for( const JsonObject &subentry : entry.get_array( "additional_tiles" ) ) {
                     const std::string s_id = subentry.get_string( "id" );
                     const std::string m_id = t_id + "_" + s_id;
                     tile_type &curr_subtile = load_tile( subentry, m_id );
@@ -900,7 +888,7 @@ void tileset_loader::load_tilejson_from_file( JsonObject &config )
  * definition of the same id is overridden.
  * @return A reference to the loaded tile inside the @ref tileset::tile_ids map.
  */
-tile_type &tileset_loader::load_tile( JsonObject &entry, const std::string &id )
+tile_type &tileset_loader::load_tile( const JsonObject &entry, const std::string &id )
 {
     tile_type curr_subtile;
 
@@ -910,7 +898,7 @@ tile_type &tileset_loader::load_tile( JsonObject &entry, const std::string &id )
     return ts.create_tile_type( id, std::move( curr_subtile ) );
 }
 
-void tileset_loader::load_tile_spritelists( JsonObject &entry,
+void tileset_loader::load_tile_spritelists( const JsonObject &entry,
         weighted_int_list<std::vector<int>> &vs,
         const std::string &objname )
 {
@@ -921,8 +909,8 @@ void tileset_loader::load_tile_spritelists( JsonObject &entry,
         // create one variation, populate sprite_ids with list of ints
         if( g_array.test_int() ) {
             std::vector<int> v;
-            while( g_array.has_more() ) {
-                const int sprite_id = g_array.next_int() + sprite_id_offset;
+            for( const int entry : g_array ) {
+                const int sprite_id = entry + sprite_id_offset;
                 if( sprite_id >= 0 ) {
                     v.push_back( sprite_id );
                 }
@@ -932,9 +920,8 @@ void tileset_loader::load_tile_spritelists( JsonObject &entry,
         // object elements of array indicates variations
         // create one variation per object
         else if( g_array.test_object() ) {
-            while( g_array.has_more() ) {
+            for( const JsonObject &vo : g_array ) {
                 std::vector<int> v;
-                JsonObject vo = g_array.next_object();
                 int weight = vo.get_int( "weight" );
                 // negative weight is invalid
                 if( weight < 0 ) {
@@ -949,9 +936,8 @@ void tileset_loader::load_tile_spritelists( JsonObject &entry,
                 }
                 // array sprite means rotations
                 else if( vo.has_array( "sprite" ) ) {
-                    JsonArray sprites = vo.get_array( "sprite" );
-                    while( sprites.has_more() ) {
-                        const int sprite_id = sprites.next_int() + sprite_id_offset;
+                    for( const int entry : vo.get_array( "sprite" ) ) {
+                        const int sprite_id = entry + sprite_id_offset;
                         if( sprite_id >= 0 && sprite_id < size ) {
                             v.push_back( sprite_id );
                         } else {
@@ -977,10 +963,29 @@ void tileset_loader::load_tile_spritelists( JsonObject &entry,
 
 struct tile_render_info {
     const tripoint pos;
-    int height_3d = 0; // accumulator for 3d tallness of sprites rendered here so far
-    tile_render_info( const tripoint &pos, int height_3d ) : pos( pos ), height_3d( height_3d ) {
+    // accumulator for 3d tallness of sprites rendered here so far;
+    int height_3d = 0;
+    lit_level ll;
+    bool invisible[5];
+    tile_render_info( const tripoint &pos, const int height_3d, const lit_level ll,
+                      const bool ( &invisible )[5] )
+        : pos( pos ), height_3d( height_3d ), ll( ll ) {
+        std::copy( invisible, invisible + 5, this->invisible );
     }
 };
+
+static int divide_round_down( int a, int b )
+{
+    if( b < 0 ) {
+        a = -a;
+        b = -b;
+    }
+    if( a >= 0 ) {
+        return a / b;
+    } else {
+        return -( ( -a + b - 1 ) / b );
+    }
+}
 
 void cata_tiles::draw( const point &dest, const tripoint &center, int width, int height,
                        std::multimap<point, formatted_text> &overlay_strings,
@@ -1007,8 +1012,6 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
         render_fill_rect( renderer, clipRect, 0, 0, 0 );
     }
 
-    const point pos = center.xy();
-
     int sx = 0;
     int sy = 0;
     get_window_tile_counts( width, height, sx, sy );
@@ -1019,7 +1022,7 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
 
     const bool iso_mode = tile_iso;
 
-    o = iso_mode ? pos : pos - point( POSX, POSY );
+    o = iso_mode ? center.xy() : center.xy() - point( POSX, POSY );
 
     op = dest;
     // Rounding up to include incomplete tiles at the bottom/right edges
@@ -1037,11 +1040,7 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
     const int max_visible_x = ( g->u.posx() % SEEX ) + ( MAPSIZE - 1 ) * SEEX;
     const int max_visible_y = ( g->u.posy() % SEEY ) + ( MAPSIZE - 1 ) * SEEY;
 
-    tripoint temp;
-    temp.z = center.z;
-    int &x = temp.x;
-    int &y = temp.y;
-    auto &ch = g->m.access_cache( temp.z );
+    const auto &ch = g->m.access_cache( center.z );
 
     //set up a default tile for the edges outside the render area
     visibility_type offscreen_type = VIS_DARK;
@@ -1054,7 +1053,7 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
     nv_goggles_activated = vision_cache[NV_GOGGLES];
 
     // check that the creature for which we'll draw the visibility map is still alive at that point
-    if( g->displaying_visibility && g->displaying_visibility_creature != nullptr )  {
+    if( g->display_overlay_state( ACTION_DISPLAY_VISIBILITY ) && g->displaying_visibility_creature ) {
         const Creature *creature = g->displaying_visibility_creature;
         const auto is_same_creature_predicate = [&creature]( const Creature & c ) {
             return creature == &c;
@@ -1063,34 +1062,77 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
             g->displaying_visibility_creature = nullptr;
         }
     }
-
+    std::unordered_set<point> collision_checkpoints;
+    std::unordered_set<point> target_points;
+    for( const wrapped_vehicle &elem : g->m.get_vehicles() ) {
+        if( elem.v->get_autodrive_target() != tripoint_zero ) {
+            target_points.insert( g->m.getlocal( elem.v->get_autodrive_target().xy() ) );
+        }
+        if( elem.v->collision_check_points.empty() ) {
+            continue;
+        } else {
+            for( const point &pt_elem : elem.v->collision_check_points ) {
+                collision_checkpoints.insert( g->m.getlocal( pt_elem ) );
+            }
+        }
+    }
+    if( g->display_overlay_state( ACTION_DISPLAY_VEHICLE_AI ) ) {
+        for( const point &pt_elem : collision_checkpoints ) {
+            overlay_strings.emplace( player_to_screen( pt_elem ) + point( tile_width / 2, 0 ),
+                                     formatted_text( "CHECK", catacurses::yellow,
+                                             NORTH ) );
+        }
+        for( const point &pt_elem : target_points ) {
+            overlay_strings.emplace( player_to_screen( pt_elem ) + point( tile_width / 2, 0 ),
+                                     formatted_text( "TARGET", catacurses::red,
+                                             NORTH ) );
+        }
+    }
     for( int row = min_row; row < max_row; row ++ ) {
         std::vector<tile_render_info> draw_points;
         draw_points.reserve( max_col );
         for( int col = min_col; col < max_col; col ++ ) {
+            int temp_x;
+            int temp_y;
             if( iso_mode ) {
                 //in isometric, rows and columns represent a checkerboard screen space, and we place
                 //the appropriate tile in valid squares by getting position relative to the screen center.
-                if( modulo( row + o.y, 2 ) != modulo( col + o.x, 2 ) ) {
+                if( modulo( row - sy / 2, 2 ) != modulo( col - sx / 2, 2 ) ) {
                     continue;
                 }
-                x = ( col - row - sx / 2 + sy / 2 ) / 2 + o.x;
-                y = ( row + col - sy / 2 - sx / 2 ) / 2 + o.y;
+                temp_x = divide_round_down( col - row - sx / 2 + sy / 2, 2 ) + o.x;
+                temp_y = divide_round_down( row + col - sy / 2 - sx / 2, 2 ) + o.y;
             } else {
-                x = col + o.x;
-                y = row + o.y;
+                temp_x = col + o.x;
+                temp_y = row + o.y;
             }
+            const tripoint pos( temp_x, temp_y, center.z );
+            const int &x = pos.x;
+            const int &y = pos.y;
+
+            lit_level ll;
+            // invisible to normal eyes
+            bool invisible[5];
+            invisible[0] = false;
+
             if( y < min_visible_y || y > max_visible_y || x < min_visible_x || x > max_visible_x ) {
-                int height_3d = 0;
-                if( !draw_terrain_from_memory( tripoint( x, y, center.z ), height_3d ) ) {
-                    apply_vision_effects( temp, offscreen_type );
+                if( has_memory_at( pos ) ) {
+                    ll = LL_MEMORIZED;
+                    invisible[0] = true;
+                } else if( has_draw_override( pos ) ) {
+                    ll = LL_DARK;
+                    invisible[0] = true;
+                } else {
+                    apply_vision_effects( pos, offscreen_type );
+                    continue;
                 }
-                continue;
+            } else {
+                ll = ch.visibility_cache[x][y];
             }
 
             // Add scent value to the overlay_strings list for every visible tile when displaying scent
-            if( g->displaying_scent ) {
-                const int scent_value = g->scent.get( {x, y, center.z} );
+            if( g->display_overlay_state( ACTION_DISPLAY_SCENT ) && !invisible[0] ) {
+                const int scent_value = g->scent.get( pos );
                 if( scent_value > 0 ) {
                     overlay_strings.emplace( player_to_screen( point( x, y ) ) + point( tile_width / 2, 0 ),
                                              formatted_text( std::to_string( scent_value ), 8 + catacurses::yellow,
@@ -1098,21 +1140,35 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
                 }
             }
 
-            if( g->displaying_radiation ) {
-                const int rad_value = g->m.get_radiation( {x, y, center.z} );
-                catacurses::base_color col;
-                if( rad_value > 0 ) {
-                    col = catacurses::green;
-                } else {
-                    col = catacurses::cyan;
+            // Add scent type to the overlay_strings list for every visible tile when displaying scent
+            if( g->display_overlay_state( ACTION_DISPLAY_SCENT_TYPE ) && !invisible[0] ) {
+                const scenttype_id scent_type = g->scent.get_type( pos );
+                if( !scent_type.is_empty() ) {
+                    overlay_strings.emplace( player_to_screen( point( x, y ) ) + point( tile_width / 2, 0 ),
+                                             formatted_text( scent_type.c_str(), 8 + catacurses::yellow,
+                                                     NORTH ) );
                 }
-                overlay_strings.emplace( player_to_screen( point( x, y ) ) + point( tile_width / 2, 0 ),
-                                         formatted_text( std::to_string( rad_value ), 8 + col, NORTH ) );
+            }
+
+            if( g->display_overlay_state( ACTION_DISPLAY_RADIATION ) ) {
+                const auto rad_override = radiation_override.find( pos );
+                const bool rad_overridden = rad_override != radiation_override.end();
+                if( rad_overridden || !invisible[0] ) {
+                    const int rad_value = rad_overridden ? rad_override->second : g->m.get_radiation( pos );
+                    catacurses::base_color col;
+                    if( rad_value > 0 ) {
+                        col = catacurses::green;
+                    } else {
+                        col = catacurses::cyan;
+                    }
+                    overlay_strings.emplace( player_to_screen( point( x, y ) ) + point( tile_width / 2, 0 ),
+                                             formatted_text( std::to_string( rad_value ), 8 + col, NORTH ) );
+                }
             }
 
             // Add temperature value to the overlay_strings list for every visible tile when displaying temperature
-            if( g->displaying_temperature ) {
-                int temp_value = g->weather.get_temperature( {x, y, center.z} );
+            if( g->display_overlay_state( ACTION_DISPLAY_TEMPERATURE ) && !invisible[0] ) {
+                int temp_value = g->weather.get_temperature( pos );
                 int ctemp = temp_to_celsius( temp_value );
                 short color;
                 const short bold = 8;
@@ -1140,8 +1196,9 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
                                                  NORTH ) );
             }
 
-            if( g->displaying_visibility && ( g->displaying_visibility_creature != nullptr ) ) {
-                const bool visibility = g->displaying_visibility_creature->sees( { x, y, center.z } );
+            if( g->display_overlay_state( ACTION_DISPLAY_VISIBILITY ) &&
+                g->displaying_visibility_creature && !invisible[0] ) {
+                const bool visibility = g->displaying_visibility_creature->sees( pos );
 
                 // color overlay.
                 auto block_color = visibility ? windowsPalette[catacurses::green] : SDL_Color{ 192, 192, 192, 255 };
@@ -1156,80 +1213,155 @@ void cata_tiles::draw( const point &dest, const tripoint &center, int width, int
                     formatted_text( visibility_str, catacurses::black, NORTH ) );
             }
 
-            if( apply_vision_effects( temp, g->m.get_visibility( ch.visibility_cache[x][y], cache ) ) ) {
-                int height_3d = 0;
-                draw_terrain_from_memory( tripoint( x, y, center.z ), height_3d );
-                const auto critter = g->critter_at( tripoint( x, y, center.z ), true );
-                if( critter != nullptr && g->u.sees_with_infrared( *critter ) ) {
-                    // TODO: defer drawing this until later when we know how tall
-                    //     the terrain/furniture under the creature is.
-                    draw_from_id_string( "infrared_creature", C_NONE, empty_string, temp, 0, 0, LL_LIT, false );
+            if( g->display_overlay_state( ACTION_DISPLAY_LIGHTING ) ) {
+                static std::vector<SDL_Color> lighting_colors;
+                if( g->displaying_lighting_condition == 0 ) {
+                    if( lighting_colors.empty() ) {
+                        SDL_Color white = { 255, 255, 255, 255 };
+                        SDL_Color blue = { 0, 0, 255, 255 };
+                        lighting_colors = color_linear_interpolate( white, blue, 9 );
+                    }
+
+                    // note: lighting will be constrained in the [1.0, 11.0] range.
+                    float ambient = g->m.ambient_light_at( {x, y, center.z} );
+                    float lighting = std::max( 1.0, LIGHT_AMBIENT_LIT - ambient + 1.0 );
+
+                    auto tile_pos = player_to_screen( point( x, y ) );
+
+                    // color overlay
+                    auto color = lighting_colors[static_cast<int>( lighting ) - 1];
+                    color.a = 100;
+                    color_blocks.first = SDL_BLENDMODE_BLEND;
+                    color_blocks.second.emplace( tile_pos, color );
+
+                    // string overlay
+                    overlay_strings.emplace( tile_pos + point( tile_width / 4, tile_height / 4 ),
+                                             formatted_text( string_format( "%.1f", ambient ), catacurses::black, NORTH ) );
                 }
-                continue;
+            }
+
+            if( !invisible[0] && apply_vision_effects( pos, g->m.get_visibility( ll, cache ) ) ) {
+
+                const Creature *critter = g->critter_at( pos, true );
+                if( has_draw_override( pos ) || has_memory_at( pos ) ||
+                    ( critter && ( g->u.sees_with_infrared( *critter ) || g->u.sees_with_specials( *critter ) ) ) ) {
+
+                    invisible[0] = true;
+                } else {
+                    continue;
+                }
+            }
+            for( int i = 0; i < 4; i++ ) {
+                const tripoint np = pos + neighborhood[i];
+                invisible[1 + i] = np.y < min_visible_y || np.y > max_visible_y ||
+                                   np.x < min_visible_x || np.x > max_visible_x ||
+                                   would_apply_vision_effects( g->m.get_visibility( ch.visibility_cache[np.x][np.y], cache ) );
             }
 
             int height_3d = 0;
 
             // light level is now used for choosing between grayscale filter and normal lit tiles.
-            // Draw Terrain if possible. If not possible then we need to continue on to the next part of loop
-            if( !draw_terrain( tripoint( x, y, center.z ), ch.visibility_cache[x][y], height_3d ) ) {
-                continue;
-            }
+            draw_terrain( pos, ll, height_3d, invisible );
 
-            draw_points.push_back( tile_render_info( tripoint( x, y, center.z ), height_3d ) );
+            draw_points.emplace_back( pos, height_3d, ll, invisible );
         }
-        const std::array<decltype( &cata_tiles::draw_furniture ), 10> drawing_layers = {{
+        const std::array<decltype( &cata_tiles::draw_furniture ), 11> drawing_layers = {{
                 &cata_tiles::draw_furniture, &cata_tiles::draw_graffiti, &cata_tiles::draw_trap,
                 &cata_tiles::draw_field_or_item, &cata_tiles::draw_vpart,
                 &cata_tiles::draw_vpart_below, &cata_tiles::draw_critter_at_below,
                 &cata_tiles::draw_terrain_below, &cata_tiles::draw_critter_at,
-                &cata_tiles::draw_zone_mark
+                &cata_tiles::draw_zone_mark, &cata_tiles::draw_zombie_revival_indicators
             }
         };
         // for each of the drawing layers in order, back to front ...
         for( auto f : drawing_layers ) {
             // ... draw all the points we drew terrain for, in the same order
             for( auto &p : draw_points ) {
-                ( this->*f )( p.pos, ch.visibility_cache[p.pos.x][p.pos.y], p.height_3d );
+                ( this->*f )( p.pos, p.ll, p.height_3d, p.invisible );
+            }
+        }
+        // display number of monsters to spawn in mapgen preview
+        for( const auto &p : draw_points ) {
+            const auto mon_override = monster_override.find( p.pos );
+            if( mon_override != monster_override.end() ) {
+                const int count = std::get<1>( mon_override->second );
+                const bool more = std::get<2>( mon_override->second );
+                if( count > 1 || more ) {
+                    std::string text = "x" + std::to_string( count );
+                    if( more ) {
+                        text += "+";
+                    }
+                    overlay_strings.emplace( player_to_screen( p.pos.xy() ) + point( tile_width / 2, 0 ),
+                                             formatted_text( text, catacurses::red, NORTH ) );
+                }
             }
         }
     }
+    // tile overrides are already drawn in the previous code
+    void_radiation_override();
+    void_terrain_override();
+    void_furniture_override();
+    void_graffiti_override();
+    void_trap_override();
+    void_field_override();
+    void_item_override();
+    void_vpart_override();
+    void_draw_below_override();
+    void_monster_override();
 
     //Memorize everything the character just saw even if it wasn't displayed.
-    for( int mem_y = 0; mem_y < MAPSIZE_Y; mem_y++ ) {
-        for( int mem_x = 0; mem_x < MAPSIZE_X; mem_x++ ) {
-            tripoint p( mem_x, mem_y, center.z );
-            //just finished o through s+o so skip them
-            rectangle skip_region( o, o + point( sx, sy ) );
-            if( skip_region.contains_half_open( p.xy() ) ) {
-                continue;
-            }
-            int height_3d = 0;
+    for( int mem_y = min_visible_y; mem_y <= max_visible_y; mem_y++ ) {
+        for( int mem_x = min_visible_x; mem_x <= max_visible_x; mem_x++ ) {
+            rectangle already_drawn( point( min_col, min_row ), point( max_col, max_row ) );
             if( iso_mode ) {
-                //Iso_mode skips in a checkerboard
-                if( modulo( mem_y, 2 ) != modulo( mem_x, 2 ) ) {
+                // calculate the screen position according to the drawing code above (division rounded down):
+
+                // mem_x = ( col - row - sx / 2 + sy / 2 ) / 2 + o.x;
+                // mem_y = ( row + col - sy / 2 - sx / 2 ) / 2 + o.y;
+                // ( col - sx / 2 ) % 2 = ( row - sy / 2 ) % 2
+                // ||
+                // \/
+                const int col = mem_y + mem_x + sx / 2 - o.y - o.x;
+                const int row = mem_y - mem_x + sy / 2 - o.y + o.x;
+                if( already_drawn.contains_half_open( point( col, row ) ) ) {
                     continue;
                 }
-                //in isometric, rows and columns represent a checkerboard screen space, and we place
-                //the appropriate tile in valid squares by getting position relative to the screen center.
-                //The MAPSIZE_X/2 offset is to keep the rectangle in the upper right quadrant.
-                p.x = ( mem_x - mem_y - MAPSIZE_X / 2 + MAPSIZE_Y / 2 ) / 2 + MAPSIZE_X / 2;
-                p.y = ( mem_y + mem_x - MAPSIZE_Y / 2 - MAPSIZE_X / 2 ) / 2 + MAPSIZE_Y / 2;
-                //Check if we're in previously done iso_mode space
-                if( p.x >= ( 0 - sy - sx / 2 + sy / 2 ) / 2 + o.x && p.x < ( sx - 0 - sx / 2 + sy / 2 ) / 2 + o.x &&
-                    p.y >= ( 0 + 0 - sy / 2 - sx / 2 ) / 2 + o.y && p.y < ( sy + sx - sy / 2 - sx / 2 ) / 2 + o.y ) {
+            } else {
+                // calculate the screen position according to the drawing code above:
+
+                // mem_x = col + o.x
+                // mem_y = row + o.y
+                // ||
+                // \/
+                // col = mem_x - o.x
+                // row = mem_y - o.y
+                if( already_drawn.contains_half_open( point( mem_x, mem_y ) - o ) ) {
                     continue;
                 }
             }
+            const tripoint p( mem_x, mem_y, center.z );
             lit_level lighting = ch.visibility_cache[p.x][p.y];
             if( apply_vision_effects( p, g->m.get_visibility( lighting, cache ) ) ) {
                 continue;
             }
+            int height_3d = 0;
+            bool invisible[5];
+            invisible[0] = false;
+            for( int i = 0; i < 4; i++ ) {
+                const tripoint np = p + neighborhood[i];
+                invisible[1 + i] = np.y < min_visible_y || np.y > max_visible_y ||
+                                   np.x < min_visible_x || np.x > max_visible_x ||
+                                   would_apply_vision_effects( g->m.get_visibility( ch.visibility_cache[np.x][np.y], cache ) );
+            }
             //calling draw to memorize everything.
-            draw_terrain( p, lighting, height_3d );
-            draw_furniture( p, lighting, height_3d );
-            draw_trap( p, lighting, height_3d );
-            draw_vpart( p, lighting, height_3d );
+            //bypass cache check in case we learn something new about the terrain's connections
+            draw_terrain( p, lighting, height_3d, invisible );
+            if( g->m.check_seen_cache( p ) ) {
+                draw_furniture( p, lighting, height_3d, invisible );
+                draw_trap( p, lighting, height_3d, invisible );
+                draw_vpart( p, lighting, height_3d, invisible );
+                g->m.check_and_set_seen_cache( p );
+            }
         }
     }
 
@@ -1378,6 +1510,13 @@ const tile_type *cata_tiles::find_tile_looks_like( std::string &id, TILE_CATEGOR
             }
             const ter_t &ter = tid.obj();
             looks_like = ter.looks_like;
+        } else if( category == C_FIELD ) {
+            const field_type_id fid( looks_like );
+            if( !fid.is_valid() ) {
+                return nullptr;
+            }
+            const field_type &ft = fid.obj();
+            looks_like = ft.looks_like;
         } else if( category == C_MONSTER ) {
             const mtype_id mid( looks_like );
             if( !mid.is_valid() ) {
@@ -1574,7 +1713,8 @@ bool cata_tiles::draw_from_id_string( std::string id, TILE_CATEGORY category,
                 sym = LINE_XXXX_C;
                 break;
             default:
-                break; // sym goes unchanged
+                // sym goes unchanged
+                break;
         }
         if( sym != 0 && sym < 256 ) {
             // see cursesport.cpp, function wattron
@@ -1661,9 +1801,19 @@ bool cata_tiles::draw_from_id_string( std::string id, TILE_CATEGORY category,
             // TODO: also use some vehicle id, for less predictability
         {
             // new scope for variable declarations
-            const optional_vpart_position vp = g->m.veh_at( pos );
-            if( vp ) {
-                seed = vp->mount().x + vp->mount().y * 65536;
+            const auto vp_override = vpart_override.find( pos );
+            const bool vp_overridden = vp_override != vpart_override.end();
+            if( vp_overridden ) {
+                const vpart_id &vp_id = std::get<0>( vp_override->second );
+                if( vp_id ) {
+                    const point &mount = std::get<4>( vp_override->second );
+                    seed = mount.x + mount.y * 65536;
+                }
+            } else {
+                const optional_vpart_position vp = g->m.veh_at( pos );
+                if( vp ) {
+                    seed = vp->mount().x + vp->mount().y * 65536;
+                }
             }
 
             //convert vehicle 360-degree direction (0=E,45=SE, etc) to 4-way tile rotation (0=N,1=W,etc)
@@ -1672,8 +1822,21 @@ bool cata_tiles::draw_from_id_string( std::string id, TILE_CATEGORY category,
 
         }
         break;
+        case C_FURNITURE: {
+            // If the furniture is not movable, we'll allow seeding by the position
+            // since we won't get the behavior that occurs where the tile constantly
+            // changes when the player grabs the furniture and drags it, causing the
+            // seed to change.
+            const furn_str_id fid( id );
+            if( fid.is_valid() ) {
+                const furn_t &f = fid.obj();
+                if( !f.is_movable() ) {
+                    seed = g->m.getabs( pos ).x + g->m.getabs( pos ).y * 65536;
+                }
+            }
+        }
+        break;
         case C_ITEM:
-        case C_FURNITURE:
         case C_TRAP:
         case C_NONE:
         case C_BULLET:
@@ -1683,7 +1846,9 @@ bool cata_tiles::draw_from_id_string( std::string id, TILE_CATEGORY category,
             break;
         case C_MONSTER:
             // FIXME: add persistent id to Creature type, instead of using monster pointer address
-            seed = reinterpret_cast<uintptr_t>( g->critter_at<monster>( pos ) );
+            if( monster_override.find( pos ) == monster_override.end() ) {
+                seed = reinterpret_cast<uintptr_t>( g->critter_at<monster>( pos ) );
+            }
             break;
         default:
             // player
@@ -1820,42 +1985,51 @@ bool cata_tiles::draw_sprite_at(
     if( rotate_sprite ) {
         switch( rota ) {
             default:
-            case 0: // unrotated (and 180, with just two sprites)
+            case 0:
+                // unrotated (and 180, with just two sprites)
                 ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr, SDL_FLIP_NONE );
                 break;
-            case 1: // 90 degrees (and 270, with just two sprites)
+            case 1:
+                // 90 degrees (and 270, with just two sprites)
 #if defined(_WIN32)
                 destination.y -= 1;
 #endif
-                if( ! tile_iso ) { // never rotate isometric tiles
+                if( !tile_iso ) {
+                    // never rotate isometric tiles
                     ret = sprite_tex->render_copy_ex( renderer, &destination, -90, nullptr, SDL_FLIP_NONE );
                 } else {
                     ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr, SDL_FLIP_NONE );
                 }
                 break;
-            case 2: // 180 degrees, implemented with flips instead of rotation
-                if( ! tile_iso ) { // never flip isometric tiles vertically
+            case 2:
+                // 180 degrees, implemented with flips instead of rotation
+                if( !tile_iso ) {
+                    // never flip isometric tiles vertically
                     ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr,
                                                       static_cast<SDL_RendererFlip>( SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL ) );
                 } else {
                     ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr, SDL_FLIP_NONE );
                 }
                 break;
-            case 3: // 270 degrees
+            case 3:
+                // 270 degrees
 #if defined(_WIN32)
                 destination.x -= 1;
 #endif
-                if( ! tile_iso ) { // never rotate isometric tiles
+                if( !tile_iso ) {
+                    // never rotate isometric tiles
                     ret = sprite_tex->render_copy_ex( renderer, &destination, 90, nullptr, SDL_FLIP_NONE );
                 } else {
                     ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr, SDL_FLIP_NONE );
                 }
                 break;
-            case 4: // flip horizontally
+            case 4:
+                // flip horizontally
                 ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr,
                                                   static_cast<SDL_RendererFlip>( SDL_FLIP_HORIZONTAL ) );
         }
-    } else { // don't rotate, same as case 0 above
+    } else {
+        // don't rotate, same as case 0 above
         ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr, SDL_FLIP_NONE );
     }
 
@@ -1878,9 +2052,17 @@ bool cata_tiles::draw_tile_at(
     return true;
 }
 
+bool cata_tiles::would_apply_vision_effects( const visibility_type visibility ) const
+{
+    return visibility != VIS_CLEAR;
+}
+
 bool cata_tiles::apply_vision_effects( const tripoint &pos,
                                        const visibility_type visibility )
 {
+    if( !would_apply_vision_effects( visibility ) ) {
+        return false;
+    }
     std::string light_name;
     switch( visibility ) {
         case VIS_HIDDEN:
@@ -1898,8 +2080,9 @@ bool cata_tiles::apply_vision_effects( const tripoint &pos,
         case VIS_DARK:
             light_name = "lighting_lowlight_dark";
             break;
-        case VIS_CLEAR: // Handled by the caller.
-            return false;
+        case VIS_CLEAR:
+            // should never happen
+            break;
     }
 
     // lighting is never rotated, though, could possibly add in random rotation?
@@ -1908,9 +2091,13 @@ bool cata_tiles::apply_vision_effects( const tripoint &pos,
     return true;
 }
 
-bool cata_tiles::draw_terrain_below( const tripoint &p, lit_level /*ll*/, int &/*height_3d*/ )
+bool cata_tiles::draw_terrain_below( const tripoint &p, const lit_level, int &,
+                                     const bool ( &invisible )[5] )
 {
-    if( !g->m.need_draw_lower_floor( p ) ) {
+    const auto low_override = draw_below_override.find( p );
+    const bool low_overridden = low_override != draw_below_override.end();
+    if( low_overridden ? !low_override->second : ( invisible[0] ||
+            !g->m.need_draw_lower_floor( p ) ) ) {
         return false;
     }
 
@@ -1974,238 +2161,488 @@ bool cata_tiles::draw_terrain_below( const tripoint &p, lit_level /*ll*/, int &/
     return true;
 }
 
-bool cata_tiles::draw_terrain( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::draw_terrain( const tripoint &p, const lit_level ll, int &height_3d,
+                               const bool ( &invisible )[5] )
 {
-    const ter_id t = g->m.ter( p ); // get the ter_id value at this point
-    // check for null, if null return false
-    if( t == t_null ) {
-        return false;
+    const auto override = terrain_override.find( p );
+    const bool overridden = override != terrain_override.end();
+    bool neighborhood_overridden = overridden;
+    if( !neighborhood_overridden ) {
+        for( const point &dir : neighborhood ) {
+            if( terrain_override.find( p + dir ) != terrain_override.end() ) {
+                neighborhood_overridden = true;
+                break;
+            }
+        }
     }
-
-    //char alteration = 0;
-    int subtile = 0;
-    int rotation = 0;
-
-    int connect_group;
-    if( g->m.ter( p ).obj().connects( connect_group ) ) {
-        get_connect_values( p, subtile, rotation, connect_group );
-    } else {
-        get_terrain_orientation( p, rotation, subtile );
-        // do something to get other terrain orientation values
+    // first memorize the actual terrain
+    const ter_id &t = g->m.ter( p );
+    if( t && !invisible[0] ) {
+        int subtile = 0;
+        int rotation = 0;
+        int connect_group = 0;
+        if( t.obj().connects( connect_group ) ) {
+            get_connect_values( p, subtile, rotation, connect_group, {} );
+            // re-memorize previously seen terrain in case new connections have been seen
+            g->m.set_memory_seen_cache_dirty( p );
+        } else {
+            get_terrain_orientation( p, rotation, subtile, {}, invisible );
+            // do something to get other terrain orientation values
+        }
+        const std::string &tname = t.id().str();
+        if( g->m.check_seen_cache( p ) ) {
+            g->u.memorize_tile( g->m.getabs( p ), tname, subtile, rotation );
+        }
+        // draw the actual terrain if there's no override
+        if( !neighborhood_overridden ) {
+            return draw_from_id_string( tname, C_TERRAIN, empty_string, p, subtile, rotation, ll,
+                                        nv_goggles_activated, height_3d );
+        }
     }
-
-    const std::string &tname = t.obj().id.str();
-    if( !g->m.check_and_set_seen_cache( p ) ) {
-        g->u.memorize_tile( g->m.getabs( p ), tname, subtile, rotation );
+    if( invisible[0] ? overridden : neighborhood_overridden ) {
+        // and then draw the override terrain
+        const ter_id &t2 = overridden ? override->second : t;
+        if( t2 ) {
+            // both the current and neighboring overrides may change the appearance
+            // of the tile, so always re-calculate it.
+            int subtile = 0;
+            int rotation = 0;
+            int connect_group = 0;
+            if( t2.obj().connects( connect_group ) ) {
+                get_connect_values( p, subtile, rotation, connect_group, terrain_override );
+            } else {
+                get_terrain_orientation( p, rotation, subtile, terrain_override, invisible );
+            }
+            const std::string &tname = t2.id().str();
+            // tile overrides are never memorized
+            // tile overrides are always shown with full visibility
+            const lit_level lit = overridden ? LL_LIT : ll;
+            const bool nv = overridden ? false : nv_goggles_activated;
+            return draw_from_id_string( tname, C_TERRAIN, empty_string, p, subtile, rotation, lit, nv,
+                                        height_3d );
+        }
+    } else if( invisible[0] && has_terrain_memory_at( p ) ) {
+        // try drawing memory if invisible and not overridden
+        const auto &t = get_terrain_memory_at( p );
+        return draw_from_id_string( t.tile, C_TERRAIN, empty_string, p, t.subtile, t.rotation,
+                                    LL_MEMORIZED, nv_goggles_activated, height_3d );
     }
-
-    return draw_from_id_string( tname, C_TERRAIN, empty_string, p, subtile, rotation, ll,
-                                nv_goggles_activated, height_3d );
+    return false;
 }
 
-bool cata_tiles::draw_terrain_from_memory( const tripoint &p, int &height_3d )
+bool cata_tiles::has_memory_at( const tripoint &p ) const
 {
-    if( !g->u.should_show_map_memory() ) {
-        return false;
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        return !t.tile.empty();
     }
-    const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
-    if( t.tile.empty() ) {
-        return false;
-    }
-
-    TILE_CATEGORY category = C_NONE;
-
-    switch( t.tile[0] ) {
-        case 't':
-            category = C_TERRAIN;
-            break;
-        case 'f':
-            category = C_FURNITURE;
-            break;
-        case 'v':
-            category = C_VEHICLE_PART;
-            break;
-        default:
-            debugmsg( "Could not infer category for memorized tile %s", t.tile );
-            break;
-    }
-
-    return draw_from_id_string( t.tile, category, empty_string, p, t.subtile, t.rotation,
-                                LL_MEMORIZED, nv_goggles_activated, height_3d );
+    return false;
 }
 
-bool cata_tiles::draw_furniture( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::has_terrain_memory_at( const tripoint &p ) const
 {
-    // get furniture ID at x,y
-    bool has_furn = g->m.has_furn( p );
-    if( !has_furn ) {
-        return false;
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 2 ) == "t_" ) {
+            return true;
+        }
     }
-
-    const furn_id f_id = g->m.furn( p );
-
-    // for rotation information
-    const int neighborhood[4] = {
-        static_cast<int>( g->m.furn( p + point_south ) ),
-        static_cast<int>( g->m.furn( p + point_east ) ),
-        static_cast<int>( g->m.furn( p + point_west ) ),
-        static_cast<int>( g->m.furn( p + point_north ) )
-    };
-
-    int subtile = 0;
-    int rotation = 0;
-    get_tile_values( f_id, neighborhood, subtile, rotation );
-
-    // get the name of this furniture piece
-    const std::string &f_name = f_id.obj().id.str();
-    if( !g->m.check_and_set_seen_cache( p ) ) {
-        g->u.memorize_tile( g->m.getabs( p ), f_name, subtile, rotation );
-    }
-
-    bool ret = draw_from_id_string( f_name, C_FURNITURE, empty_string, p, subtile, rotation, ll,
-                                    nv_goggles_activated, height_3d );
-    return ret;
+    return false;
 }
 
-bool cata_tiles::draw_trap( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::has_furniture_memory_at( const tripoint &p ) const
 {
-    const trap &tr = g->m.tr_at( p );
-    if( !tr.can_see( p, g->u ) ) {
-        return false;
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 2 ) == "f_" ) {
+            return true;
+        }
     }
-
-    const int neighborhood[4] = {
-        static_cast<int>( g->m.tr_at( p + point_south ).loadid ),
-        static_cast<int>( g->m.tr_at( p + point_east ).loadid ),
-        static_cast<int>( g->m.tr_at( p + point_west ).loadid ),
-        static_cast<int>( g->m.tr_at( p + point_north ).loadid )
-    };
-
-    int subtile = 0;
-    int rotation = 0;
-    get_tile_values( tr.loadid, neighborhood, subtile, rotation );
-
-    if( !g->m.check_and_set_seen_cache( p ) ) {
-        g->u.memorize_tile( g->m.getabs( p ), tr.id.str(), subtile, rotation );
-    }
-
-    return draw_from_id_string( tr.id.str(), C_TRAP, empty_string, p, subtile, rotation, ll,
-                                nv_goggles_activated, height_3d );
+    return false;
 }
 
-bool cata_tiles::draw_graffiti( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::has_trap_memory_at( const tripoint &p ) const
 {
-    if( !g->m.has_graffiti_at( p ) ) {
-        return false;
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 3 ) == "tr_" ) {
+            return true;
+        }
     }
-
-    return draw_from_id_string( "graffiti", C_NONE, empty_string, p, 0, 0, ll, false, height_3d );
+    return false;
 }
 
-bool cata_tiles::draw_field_or_item( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::has_vpart_memory_at( const tripoint &p ) const
 {
-    const field &f = g->m.field_at( p );
-    const field_type &fld_type = g->m.field_at( p ).displayed_field_type().obj();
-    bool ret_draw_field = true;
-    bool ret_draw_items = true;
-    if( fld_type.display_field ) {
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 3 ) == "vp_" ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+memorized_terrain_tile cata_tiles::get_terrain_memory_at( const tripoint &p ) const
+{
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 2 ) == "t_" ) {
+            return t;
+        }
+    }
+    return {};
+}
+
+memorized_terrain_tile cata_tiles::get_furniture_memory_at( const tripoint &p ) const
+{
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 2 ) == "f_" ) {
+            return t;
+        }
+    }
+    return {};
+}
+
+memorized_terrain_tile cata_tiles::get_trap_memory_at( const tripoint &p ) const
+{
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 3 ) == "tr_" ) {
+            return t;
+        }
+    }
+    return {};
+}
+
+memorized_terrain_tile cata_tiles::get_vpart_memory_at( const tripoint &p ) const
+{
+    if( g->u.should_show_map_memory() ) {
+        const memorized_terrain_tile t = g->u.get_memorized_tile( g->m.getabs( p ) );
+        if( t.tile.substr( 0, 3 ) == "vp_" ) {
+            return t;
+        }
+    }
+    return {};
+}
+
+bool cata_tiles::draw_furniture( const tripoint &p, const lit_level ll, int &height_3d,
+                                 const bool ( &invisible )[5] )
+{
+    const auto override = furniture_override.find( p );
+    const bool overridden = override != furniture_override.end();
+    bool neighborhood_overridden = overridden;
+    if( !neighborhood_overridden ) {
+        for( const point &dir : neighborhood ) {
+            if( furniture_override.find( p + dir ) != furniture_override.end() ) {
+                neighborhood_overridden = true;
+                break;
+            }
+        }
+    }
+    // first memorize the actual furniture
+    const furn_id &f = g->m.furn( p );
+    if( f && !invisible[0] ) {
+        const int neighborhood[4] = {
+            static_cast<int>( g->m.furn( p + point_south ) ),
+            static_cast<int>( g->m.furn( p + point_east ) ),
+            static_cast<int>( g->m.furn( p + point_west ) ),
+            static_cast<int>( g->m.furn( p + point_north ) )
+        };
+        int subtile = 0;
+        int rotation = 0;
+        get_tile_values( f.to_i(), neighborhood, subtile, rotation );
+        const std::string &fname = f.id().str();
+        if( g->m.check_seen_cache( p ) ) {
+            g->u.memorize_tile( g->m.getabs( p ), fname, subtile, rotation );
+        }
+        // draw the actual furniture if there's no override
+        if( !neighborhood_overridden ) {
+            return draw_from_id_string( fname, C_FURNITURE, empty_string, p, subtile, rotation, ll,
+                                        nv_goggles_activated, height_3d );
+        }
+    }
+    if( invisible[0] ? overridden : neighborhood_overridden ) {
+        // and then draw the override furniture
+        const furn_id &f2 = overridden ? override->second : f;
+        if( f2 ) {
+            // both the current and neighboring overrides may change the appearance
+            // of the tile, so always re-calculate it.
+            const auto furn = [&]( const tripoint & q, const bool invis ) -> furn_id {
+                const auto it = furniture_override.find( q );
+                return it != furniture_override.end() ? it->second :
+                ( !overridden || !invis ) ? g->m.furn( q ) : f_null;
+            };
+            const int neighborhood[4] = {
+                static_cast<int>( furn( p + point_south, invisible[1] ) ),
+                static_cast<int>( furn( p + point_east, invisible[2] ) ),
+                static_cast<int>( furn( p + point_west, invisible[3] ) ),
+                static_cast<int>( furn( p + point_north, invisible[4] ) )
+            };
+            int subtile = 0;
+            int rotation = 0;
+            get_tile_values( f2.to_i(), neighborhood, subtile, rotation );
+            const std::string &fname = f2.id().str();
+            // tile overrides are never memorized
+            // tile overrides are always shown with full visibility
+            const lit_level lit = overridden ? LL_LIT : ll;
+            const bool nv = overridden ? false : nv_goggles_activated;
+            return draw_from_id_string( fname, C_FURNITURE, empty_string, p, subtile, rotation, lit, nv,
+                                        height_3d );
+        }
+    } else if( invisible[0] && has_furniture_memory_at( p ) ) {
+        // try drawing memory if invisible and not overridden
+        const auto &t = get_furniture_memory_at( p );
+        return draw_from_id_string( t.tile, C_FURNITURE, empty_string, p, t.subtile, t.rotation,
+                                    LL_MEMORIZED, nv_goggles_activated, height_3d );
+    }
+    return false;
+}
+
+bool cata_tiles::draw_trap( const tripoint &p, const lit_level ll, int &height_3d,
+                            const bool ( &invisible )[5] )
+{
+    const auto override = trap_override.find( p );
+    const bool overridden = override != trap_override.end();
+    bool neighborhood_overridden = overridden;
+    if( !neighborhood_overridden ) {
+        for( const point &dir : neighborhood ) {
+            if( trap_override.find( p + dir ) != trap_override.end() ) {
+                neighborhood_overridden = true;
+                break;
+            }
+        }
+    }
+
+    // first memorize the actual trap
+    const trap_id &tr = g->m.tr_at( p ).loadid;
+    if( tr && !invisible[0] && tr.obj().can_see( p, g->u ) ) {
+        const int neighborhood[4] = {
+            static_cast<int>( g->m.tr_at( p + point_south ).loadid ),
+            static_cast<int>( g->m.tr_at( p + point_east ).loadid ),
+            static_cast<int>( g->m.tr_at( p + point_west ).loadid ),
+            static_cast<int>( g->m.tr_at( p + point_north ).loadid )
+        };
+        int subtile = 0;
+        int rotation = 0;
+        get_tile_values( tr.to_i(), neighborhood, subtile, rotation );
+        const std::string trname = tr.id().str();
+        if( g->m.check_seen_cache( p ) ) {
+            g->u.memorize_tile( g->m.getabs( p ), trname, subtile, rotation );
+        }
+        // draw the actual trap if there's no override
+        if( !neighborhood_overridden ) {
+            return draw_from_id_string( trname, C_TRAP, empty_string, p, subtile, rotation, ll,
+                                        nv_goggles_activated, height_3d );
+        }
+    }
+    if( overridden || ( !invisible[0] && neighborhood_overridden && tr.obj().can_see( p, g->u ) ) ) {
+        // and then draw the override trap
+        const trap_id &tr2 = overridden ? override->second : tr;
+        if( tr2 ) {
+            // both the current and neighboring overrides may change the appearance
+            // of the tile, so always re-calculate it.
+            const auto tr_at = [&]( const tripoint & q, const bool invis ) -> trap_id {
+                const auto it = trap_override.find( q );
+                return it != trap_override.end() ? it->second :
+                ( !overridden || !invis ) ? g->m.tr_at( q ).loadid : tr_null;
+            };
+            const int neighborhood[4] = {
+                static_cast<int>( tr_at( p + point_south, invisible[1] ) ),
+                static_cast<int>( tr_at( p + point_east, invisible[2] ) ),
+                static_cast<int>( tr_at( p + point_west, invisible[3] ) ),
+                static_cast<int>( tr_at( p + point_north, invisible[4] ) )
+            };
+            int subtile = 0;
+            int rotation = 0;
+            get_tile_values( tr2.to_i(), neighborhood, subtile, rotation );
+            const std::string &trname = tr2.id().str();
+            // tile overrides are never memorized
+            // tile overrides are always shown with full visibility
+            const lit_level lit = overridden ? LL_LIT : ll;
+            const bool nv = overridden ? false : nv_goggles_activated;
+            return draw_from_id_string( trname, C_TRAP, empty_string, p, subtile, rotation, lit, nv,
+                                        height_3d );
+        }
+    } else if( invisible[0] && has_trap_memory_at( p ) ) {
+        // try drawing memory if invisible and not overridden
+        const auto &t = get_trap_memory_at( p );
+        return draw_from_id_string( t.tile, C_TRAP, empty_string, p, t.subtile, t.rotation,
+                                    LL_MEMORIZED, nv_goggles_activated, height_3d );
+    }
+    return false;
+}
+
+bool cata_tiles::draw_graffiti( const tripoint &p, const lit_level ll, int &height_3d,
+                                const bool ( &invisible )[5] )
+{
+    const auto override = graffiti_override.find( p );
+    const bool overridden = override != graffiti_override.end();
+    if( overridden ? !override->second : ( invisible[0] || !g->m.has_graffiti_at( p ) ) ) {
+        return false;
+    }
+    const lit_level lit = overridden ? LL_LIT : ll;
+    return draw_from_id_string( "graffiti", C_NONE, empty_string, p, 0, 0, lit, false, height_3d );
+}
+
+bool cata_tiles::draw_field_or_item( const tripoint &p, const lit_level ll, int &height_3d,
+                                     const bool ( &invisible )[5] )
+{
+    const auto fld_override = field_override.find( p );
+    const bool fld_overridden = fld_override != field_override.end();
+    const field_type_id &fld = fld_overridden ?
+                               fld_override->second : g->m.field_at( p ).displayed_field_type();
+    bool ret_draw_field = false;
+    bool ret_draw_items = false;
+    if( ( fld_overridden || !invisible[0] ) && fld.obj().display_field ) {
+        const lit_level lit = fld_overridden ? LL_LIT : ll;
+        const bool nv = fld_overridden ? false : nv_goggles_activated;
+
+        auto field_at = [&]( const tripoint & q, const bool invis ) -> field_type_id {
+            const auto it = field_override.find( q );
+            return it != field_override.end() ? it->second :
+            ( !fld_overridden || !invis ) ? g->m.field_at( q ).displayed_field_type() : fd_null;
+        };
         // for rotation information
         const int neighborhood[4] = {
-            static_cast<int>( g->m.field_at( p + point_south ).displayed_field_type() ),
-            static_cast<int>( g->m.field_at( p + point_east ).displayed_field_type() ),
-            static_cast<int>( g->m.field_at( p + point_west ).displayed_field_type() ),
-            static_cast<int>( g->m.field_at( p + point_north ).displayed_field_type() )
+            static_cast<int>( field_at( p + point_south, invisible[1] ) ),
+            static_cast<int>( field_at( p + point_east, invisible[2] ) ),
+            static_cast<int>( field_at( p + point_west, invisible[3] ) ),
+            static_cast<int>( field_at( p + point_north, invisible[4] ) )
         };
 
         int subtile = 0;
         int rotation = 0;
-        get_tile_values( f.displayed_field_type(), neighborhood, subtile, rotation );
+        get_tile_values( fld.to_i(), neighborhood, subtile, rotation );
 
-        ret_draw_field = draw_from_id_string( fld_type.id.c_str(), C_FIELD, empty_string, p, subtile,
-                                              rotation, ll, nv_goggles_activated );
+        ret_draw_field = draw_from_id_string( fld.id().str(), C_FIELD, empty_string, p, subtile,
+                                              rotation, lit, nv );
     }
-    if( fld_type.display_items ) {
-        if( !g->m.sees_some_items( p, g->u ) ) {
-            return false;
-        }
-        const maptile &cur_maptile = g->m.maptile_at( p );
-        // get the last item in the stack, it will be used for display
-        const item &displayed_item = cur_maptile.get_uppermost_item();
-        // get the item's name, as that is the key used to find it in the map
-        const std::string it_name = displayed_item.is_corpse() ? "corpse_" +
-                                    displayed_item.get_mtype()->id.str() : displayed_item.typeId();
+    if( fld.obj().display_items ) {
+        const auto it_override = item_override.find( p );
+        const bool it_overridden = it_override != item_override.end();
 
-        const std::string it_category = displayed_item.type->get_item_type_string();
-        ret_draw_items = draw_from_id_string( it_name, C_ITEM, it_category, p, 0, 0, ll,
-                                              nv_goggles_activated, height_3d );
-        if( ret_draw_items && cur_maptile.get_item_count() > 1 ) {
-            draw_item_highlight( p );
+        itype_id it_id;
+        mtype_id mon_id;
+        bool hilite;
+        const itype *it_type;
+        if( it_overridden ) {
+            it_id = std::get<0>( it_override->second );
+            mon_id = std::get<1>( it_override->second );
+            hilite = std::get<2>( it_override->second );
+            it_type = item::find_type( it_id );
+        } else if( !invisible[0] && g->m.sees_some_items( p, g->u ) ) {
+            const maptile &tile = g->m.maptile_at( p );
+            const item &itm = tile.get_uppermost_item();
+            const mtype *const mon = itm.get_mtype();
+            it_id = itm.typeId();
+            mon_id = mon ? mon->id : mtype_id::NULL_ID();
+            hilite = tile.get_item_count() > 1;
+            it_type = itm.type;
+        } else {
+            it_type = nullptr;
+        }
+        if( it_type && it_id != "null" ) {
+            const std::string disp_id = it_id == "corpse" && mon_id ?
+                                        "corpse_" + mon_id.str() : it_id;
+            const std::string it_category = it_type->get_item_type_string();
+            const lit_level lit = it_overridden ? LL_LIT : ll;
+            const bool nv = it_overridden ? false : nv_goggles_activated;
+
+            ret_draw_items = draw_from_id_string( disp_id, C_ITEM, it_category, p, 0, 0, lit,
+                                                  nv, height_3d );
+            if( ret_draw_items && hilite ) {
+                draw_item_highlight( p );
+            }
         }
     }
     return ret_draw_field && ret_draw_items;
 }
 
-bool cata_tiles::draw_vpart_below( const tripoint &p, lit_level /*ll*/, int &/*height_3d*/ )
+bool cata_tiles::draw_vpart_below( const tripoint &p, const lit_level /*ll*/, int &/*height_3d*/,
+                                   const bool ( &invisible )[5] )
 {
-    if( !g->m.need_draw_lower_floor( p ) ) {
+    const auto low_override = draw_below_override.find( p );
+    const bool low_overridden = low_override != draw_below_override.end();
+    if( low_overridden ? !low_override->second : ( invisible[0] ||
+            !g->m.need_draw_lower_floor( p ) ) ) {
         return false;
     }
     tripoint pbelow( p.xy(), p.z - 1 );
     int height_3d_below = 0;
-    return draw_vpart( pbelow, LL_LOW, height_3d_below );
+    bool below_invisible[5];
+    std::fill( below_invisible, below_invisible + 5, false );
+    return draw_vpart( pbelow, LL_LOW, height_3d_below, below_invisible );
 }
 
-bool cata_tiles::draw_vpart( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::draw_vpart( const tripoint &p, lit_level ll, int &height_3d,
+                             const bool ( &invisible )[5] )
 {
+    const auto override = vpart_override.find( p );
+    const bool overridden = override != vpart_override.end();
+    // first memorize the actual vpart
     const optional_vpart_position vp = g->m.veh_at( p );
-
-    if( !vp ) {
-        return false;
-    }
-    vehicle *const veh = &vp->vehicle();
-    // veh_part is the index of the part
-    const int veh_part = vp->part_index();
-
-    // Gets the visible part, should work fine once tileset vp_ids are updated to work with the vehicle part json ids
-    // get the vpart_id
-    char part_mod = 0;
-    const vpart_id &vp_id = veh->part_id_string( veh_part, part_mod );
-
-    // prefix with vp_ ident
-    const std::string vpid = "vp_" + vp_id.str();
-    int subtile = 0;
-    if( part_mod > 0 ) {
-        switch( part_mod ) {
-            case 1:
-                subtile = open_;
-                break;
-            case 2:
-                subtile = broken;
-                break;
+    if( vp && !invisible[0] ) {
+        const vehicle &veh = vp->vehicle();
+        const int veh_part = vp->part_index();
+        // Gets the visible part, should work fine once tileset vp_ids are updated to work with the vehicle part json ids
+        // get the vpart_id
+        char part_mod = 0;
+        const vpart_id &vp_id = veh.part_id_string( veh_part, part_mod );
+        const int subtile = part_mod == 1 ? open_ : part_mod == 2 ? broken : 0;
+        const int rotation = veh.face.dir();
+        const std::string vpname = "vp_" + vp_id.str();
+        if( !veh.forward_velocity() && !veh.player_in_control( g->u ) &&
+            g->m.check_seen_cache( p ) ) {
+            g->u.memorize_tile( g->m.getabs( p ), vpname, subtile, rotation );
+        }
+        if( !overridden ) {
+            const cata::optional<vpart_reference> cargopart = vp.part_with_feature( "CARGO", true );
+            const bool draw_highlight = cargopart && !veh.get_items( cargopart->part_index() ).empty();
+            const bool ret = draw_from_id_string( vpname, C_VEHICLE_PART, empty_string, p, subtile, rotation,
+                                                  ll, nv_goggles_activated, height_3d );
+            if( ret && draw_highlight ) {
+                draw_item_highlight( p );
+            }
+            return ret;
         }
     }
-    const cata::optional<vpart_reference> cargopart = vp.part_with_feature( "CARGO", true );
-    bool draw_highlight = cargopart && !veh->get_items( cargopart->part_index() ).empty();
-
-    int veh_dir = veh->face.dir();
-    if( !veh->forward_velocity() && !veh->player_in_control( g->u ) ) {
-        if( !g->m.check_and_set_seen_cache( p ) ) {
-            g->u.memorize_tile( g->m.getabs( p ), vpid, subtile, veh_dir );
+    if( overridden ) {
+        // and then draw the override vpart
+        const vpart_id &vp2 = std::get<0>( override->second );
+        if( vp2 ) {
+            const char part_mod = std::get<1>( override->second );
+            const int subtile = part_mod == 1 ? open_ : part_mod == 2 ? broken : 0;
+            const int rotation = std::get<2>( override->second );
+            const int draw_highlight = std::get<3>( override->second );
+            const std::string vpname = "vp_" + vp2.str();
+            // tile overrides are never memorized
+            // tile overrides are always shown with full visibility
+            const bool ret = draw_from_id_string( vpname, C_VEHICLE_PART, empty_string, p, subtile, rotation,
+                                                  LL_LIT, false, height_3d );
+            if( ret && draw_highlight ) {
+                draw_item_highlight( p );
+            }
+            return ret;
         }
+    } else if( invisible[0] && has_vpart_memory_at( p ) ) {
+        // try drawing memory if invisible and not overridden
+        const auto &t = get_vpart_memory_at( p );
+        return draw_from_id_string( t.tile, C_VEHICLE_PART, empty_string, p, t.subtile, t.rotation,
+                                    LL_MEMORIZED, nv_goggles_activated, height_3d );
     }
-
-    bool ret = draw_from_id_string( vpid, C_VEHICLE_PART, empty_string, p, subtile, veh_dir,
-                                    ll, nv_goggles_activated, height_3d );
-    if( ret && draw_highlight ) {
-        draw_item_highlight( p );
-    }
-    return ret;
+    return false;
 }
 
-bool cata_tiles::draw_critter_at_below( const tripoint &p, lit_level, int & )
+bool cata_tiles::draw_critter_at_below( const tripoint &p, const lit_level, int &,
+                                        const bool ( &invisible )[5] )
 {
     // Check if we even need to draw below. If not, bail.
-    if( !g->m.need_draw_lower_floor( p ) ) {
+    const auto low_override = draw_below_override.find( p );
+    const bool low_overridden = low_override != draw_below_override.end();
+    if( low_overridden ? !low_override->second : ( invisible[0] ||
+            !g->m.need_draw_lower_floor( p ) ) ) {
         return false;
     }
 
@@ -2221,7 +2658,8 @@ bool cata_tiles::draw_critter_at_below( const tripoint &p, lit_level, int & )
     // Check if the player can actually see the critter. We don't care if
     // it's via infrared or not, just whether or not they're seen. If not,
     // we can bail.
-    if( !g->u.sees( *critter ) && !g->u.sees_with_infrared( *critter ) ) {
+    if( !g->u.sees( *critter ) && !( g->u.sees_with_infrared( *critter ) ||
+                                     g->u.sees_with_specials( *critter ) ) ) {
         return false;
     }
 
@@ -2251,17 +2689,125 @@ bool cata_tiles::draw_critter_at_below( const tripoint &p, lit_level, int & )
     return true;
 }
 
-bool cata_tiles::draw_critter_at( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::draw_critter_at( const tripoint &p, lit_level ll, int &height_3d,
+                                  const bool ( &invisible )[5] )
 {
-    const auto critter = g->critter_at( p, true );
-    if( critter != nullptr ) {
-        return draw_entity( *critter, p, ll, height_3d );
+    bool result;
+    bool is_player;
+    bool sees_player;
+    Creature::Attitude attitude;
+    const auto override = monster_override.find( p );
+    if( override != monster_override.end() ) {
+        const mtype_id id = std::get<0>( override->second );
+        if( !id ) {
+            return false;
+        }
+        is_player = false;
+        sees_player = false;
+        attitude = std::get<3>( override->second );
+        const std::string &chosen_id = id.str();
+        const std::string &ent_subcategory = id.obj().species.empty() ?
+                                             empty_string : id.obj().species.begin()->str();
+        result = draw_from_id_string( chosen_id, C_MONSTER, ent_subcategory, p, corner, 0, LL_LIT, false,
+                                      height_3d );
+    } else if( !invisible[0] ) {
+        const Creature *pcritter = g->critter_at( p, true );
+        if( pcritter == nullptr ) {
+            return false;
+        }
+        const Creature &critter = *pcritter;
+
+        if( !g->u.sees( critter ) ) {
+            if( g->u.sees_with_infrared( critter ) || g->u.sees_with_specials( critter ) ) {
+                return draw_from_id_string( "infrared_creature", C_NONE, empty_string, p, 0, 0,
+                                            LL_LIT, false, height_3d );
+            }
+            return false;
+        }
+        result = false;
+        sees_player = false;
+        is_player = false;
+        attitude = Creature::A_ANY;
+        const monster *m = dynamic_cast<const monster *>( &critter );
+        if( m != nullptr ) {
+            const auto ent_category = C_MONSTER;
+            std::string ent_subcategory = empty_string;
+            if( !m->type->species.empty() ) {
+                ent_subcategory = m->type->species.begin()->str();
+            }
+            const int subtile = corner;
+            // depending on the toggle flip sprite left or right
+            int rot_facing = -1;
+            if( m->facing == FD_RIGHT ) {
+                rot_facing = 0;
+            } else if( m->facing == FD_LEFT ) {
+                rot_facing = 4;
+            }
+            if( rot_facing >= 0 ) {
+                const auto ent_name = m->type->id;
+                std::string chosen_id = ent_name.str();
+                if( m->has_effect( effect_ridden ) ) {
+                    int pl_under_height = 6;
+                    if( m->mounted_player ) {
+                        draw_entity_with_overlays( *m->mounted_player, p, ll, pl_under_height );
+                    }
+                    const std::string prefix = "rid_";
+                    std::string copy_id = chosen_id;
+                    const std::string ridden_id = copy_id.insert( 0, prefix );
+                    const tile_type *tt = tileset_ptr->find_tile_type( ridden_id );
+                    if( tt ) {
+                        chosen_id = ridden_id;
+                    }
+                }
+                result = draw_from_id_string( chosen_id, ent_category, ent_subcategory, p, subtile, rot_facing,
+                                              ll, false, height_3d );
+                sees_player = m->sees( g->u );
+                attitude = m->attitude_to( g-> u );
+            }
+        }
+        const player *pl = dynamic_cast<const player *>( &critter );
+        if( pl != nullptr ) {
+            draw_entity_with_overlays( *pl, p, ll, height_3d );
+            result = true;
+            if( pl->is_player() ) {
+                is_player = true;
+            } else {
+                sees_player = pl->sees( g-> u );
+                attitude = pl->attitude_to( g-> u );
+            }
+        }
+    } else {
+        // invisible
+        const Creature *critter = g->critter_at( p, true );
+        if( critter && ( g->u.sees_with_infrared( *critter ) || g->u.sees_with_specials( *critter ) ) ) {
+            // try drawing infrared creature if invisible and not overridden
+            // return directly without drawing overlay
+            return draw_from_id_string( "infrared_creature", C_NONE, empty_string, p, 0, 0, LL_LIT, false,
+                                        height_3d );
+        } else {
+            return false;
+        }
     }
-    return false;
+
+    if( result && !is_player ) {
+        std::string draw_id = "overlay_" + Creature::attitude_raw_string( attitude );
+        if( sees_player ) {
+            draw_id += "_sees_player";
+        }
+        if( tileset_ptr->find_tile_type( draw_id ) ) {
+            draw_from_id_string( draw_id, C_NONE, empty_string, p, 0, 0, LL_LIT, false, height_3d );
+        }
+    }
+    return result;
 }
 
-bool cata_tiles::draw_zone_mark( const tripoint &p, lit_level ll, int &height_3d )
+bool cata_tiles::draw_zone_mark( const tripoint &p, lit_level ll, int &height_3d,
+                                 const bool ( &invisible )[5] )
 {
+    if( invisible[0] ) {
+        return false;
+    }
+
     if( !g->is_zones_manager_open() ) {
         return false;
     }
@@ -2282,111 +2828,51 @@ bool cata_tiles::draw_zone_mark( const tripoint &p, lit_level ll, int &height_3d
     return false;
 }
 
-bool cata_tiles::draw_entity( const Creature &critter, const tripoint &p, lit_level ll,
-                              int &height_3d )
+bool cata_tiles::draw_zombie_revival_indicators( const tripoint &pos, const lit_level /*ll*/,
+        int &/*height_3d*/, const bool ( &invisible )[5] )
 {
-    if( !g->u.sees( critter ) ) {
-        if( g->u.sees_with_infrared( critter ) ) {
-            return draw_from_id_string( "infrared_creature", C_NONE, empty_string, p, 0, 0,
-                                        LL_LIT, false, height_3d );
-        }
-        return false;
-    }
-    bool result = false;
-    bool sees_player = false;
-    bool is_player = false;
-    Creature::Attitude attitude = Creature::A_ANY;
-    const monster *m = dynamic_cast<const monster *>( &critter );
-    if( m != nullptr ) {
-        const auto ent_category = C_MONSTER;
-        std::string ent_subcategory = empty_string;
-        if( !m->type->species.empty() ) {
-            ent_subcategory = m->type->species.begin()->str();
-        }
-        const int subtile = corner;
-        // depending on the toggle flip sprite left or right
-        int rot_facing = -1;
-        if( m->facing == FD_RIGHT ) {
-            rot_facing = 0;
-        } else if( m->facing == FD_LEFT ) {
-            rot_facing = 4;
-        }
-        if( rot_facing >= 0 ) {
-            const auto ent_name = m->type->id;
-            std::string chosen_id = ent_name.str();
-            if( m->has_effect( effect_ridden ) ) {
-                int pl_under_height = 6;
-                draw_entity_with_overlays( g->u, p, ll, pl_under_height );
-                const std::string prefix = "rid_";
-                std::string copy_id = chosen_id;
-                const std::string ridden_id = copy_id.insert( 0, prefix );
-                const tile_type *tt = tileset_ptr->find_tile_type( ridden_id );
-                if( tt ) {
-                    chosen_id = ridden_id;
-                }
+    if( tileset_ptr->find_tile_type( ZOMBIE_REVIVAL_INDICATOR ) && !invisible[0] &&
+        item_override.find( pos ) == item_override.end() && g->m.could_see_items( pos, g->u ) ) {
+        for( auto &i : g->m.i_at( pos ) ) {
+            if( i.can_revive() ) {
+                return draw_from_id_string( ZOMBIE_REVIVAL_INDICATOR, C_NONE, empty_string, pos, 0, 0, LL_LIT,
+                                            false );
             }
-            result = draw_from_id_string( chosen_id, ent_category, ent_subcategory, p, subtile, rot_facing,
-                                          ll, false, height_3d );
-            sees_player = m->sees( g->u );
-            attitude = m->attitude_to( g-> u );
         }
     }
-    const player *pl = dynamic_cast<const player *>( &critter );
-    if( pl != nullptr ) {
-        draw_entity_with_overlays( *pl, p, ll, height_3d );
-        result = true;
-        if( pl->is_player() ) {
-            is_player = true;
-        } else {
-            sees_player = pl->sees( g-> u );
-            attitude = pl->attitude_to( g-> u );
-        }
-    }
-
-    if( result && !is_player ) {
-        std::ostringstream tmp_id;
-        tmp_id << "overlay_" << Creature::attitude_raw_string( attitude );
-        if( sees_player ) {
-            tmp_id << "_sees_player";
-        }
-        const std::string draw_id = tmp_id.str();
-        if( tileset_ptr->find_tile_type( draw_id ) ) {
-            draw_from_id_string( draw_id, C_NONE, empty_string, p, 0, 0, LL_LIT, false, height_3d );
-        }
-    }
-    return result;
+    return false;
 }
 
-void cata_tiles::draw_entity_with_overlays( const player &pl, const tripoint &p, lit_level ll,
+void cata_tiles::draw_entity_with_overlays( const Character &ch, const tripoint &p, lit_level ll,
         int &height_3d )
 {
     std::string ent_name;
 
-    if( pl.is_npc() ) {
-        ent_name = pl.male ? "npc_male" : "npc_female";
+    if( ch.is_npc() ) {
+        ent_name = ch.male ? "npc_male" : "npc_female";
     } else {
-        ent_name = pl.male ? "player_male" : "player_female";
+        ent_name = ch.male ? "player_male" : "player_female";
     }
     // first draw the character itself(i guess this means a tileset that
     // takes this seriously needs a naked sprite)
     int prev_height_3d = height_3d;
 
     // depending on the toggle flip sprite left or right
-    if( pl.facing == FD_RIGHT ) {
+    if( ch.facing == FD_RIGHT ) {
         draw_from_id_string( ent_name, C_NONE, "", p, corner, 0, ll, false, height_3d );
-    } else if( pl.facing == FD_LEFT ) {
+    } else if( ch.facing == FD_LEFT ) {
         draw_from_id_string( ent_name, C_NONE, "", p, corner, 4, ll, false, height_3d );
     }
 
     // next up, draw all the overlays
-    std::vector<std::string> overlays = pl.get_overlay_ids();
+    std::vector<std::string> overlays = ch.get_overlay_ids();
     for( const std::string &overlay : overlays ) {
         std::string draw_id = overlay;
-        if( find_overlay_looks_like( pl.male, overlay, draw_id ) ) {
+        if( find_overlay_looks_like( ch.male, overlay, draw_id ) ) {
             int overlay_height_3d = prev_height_3d;
-            if( pl.facing == FD_RIGHT ) {
+            if( ch.facing == FD_RIGHT ) {
                 draw_from_id_string( draw_id, C_NONE, "", p, corner, /*rota:*/ 0, ll, false, overlay_height_3d );
-            } else if( pl.facing == FD_LEFT ) {
+            } else if( ch.facing == FD_LEFT ) {
                 draw_from_id_string( draw_id, C_NONE, "", p, corner, /*rota:*/ 4, ll, false, overlay_height_3d );
             }
             // the tallest height-having overlay is the one that counts
@@ -2479,6 +2965,49 @@ void cata_tiles::init_draw_zones( const tripoint &_start, const tripoint &_end,
     zone_end = _end;
     zone_offset = _offset;
 }
+void cata_tiles::init_draw_radiation_override( const tripoint &p, const int rad )
+{
+    radiation_override.emplace( p, rad );
+}
+void cata_tiles::init_draw_terrain_override( const tripoint &p, const ter_id &id )
+{
+    terrain_override.emplace( p, id );
+}
+void cata_tiles::init_draw_furniture_override( const tripoint &p, const furn_id &id )
+{
+    furniture_override.emplace( p, id );
+}
+void cata_tiles::init_draw_graffiti_override( const tripoint &p, const bool has )
+{
+    graffiti_override.emplace( p, has );
+}
+void cata_tiles::init_draw_trap_override( const tripoint &p, const trap_id &id )
+{
+    trap_override.emplace( p, id );
+}
+void cata_tiles::init_draw_field_override( const tripoint &p, const field_type_id &id )
+{
+    field_override.emplace( p, id );
+}
+void cata_tiles::init_draw_item_override( const tripoint &p, const itype_id &id,
+        const mtype_id &mid, const bool hilite )
+{
+    item_override.emplace( p, std::make_tuple( id, mid, hilite ) );
+}
+void cata_tiles::init_draw_vpart_override( const tripoint &p, const vpart_id &id,
+        const int part_mod, const int veh_dir, const bool hilite, const point &mount )
+{
+    vpart_override.emplace( p, std::make_tuple( id, part_mod, veh_dir, hilite, mount ) );
+}
+void cata_tiles::init_draw_below_override( const tripoint &p, const bool draw )
+{
+    draw_below_override.emplace( p, draw );
+}
+void cata_tiles::init_draw_monster_override( const tripoint &p, const mtype_id &id, const int count,
+        const bool more, const Creature::Attitude att )
+{
+    monster_override.emplace( p, std::make_tuple( id, count, more, att ) );
+}
 /* -- Void Animators */
 void cata_tiles::void_explosion()
 {
@@ -2535,6 +3064,59 @@ void cata_tiles::void_zones()
 {
     do_draw_zones = false;
 }
+void cata_tiles::void_radiation_override()
+{
+    radiation_override.clear();
+}
+void cata_tiles::void_terrain_override()
+{
+    terrain_override.clear();
+}
+void cata_tiles::void_furniture_override()
+{
+    furniture_override.clear();
+}
+void cata_tiles::void_graffiti_override()
+{
+    graffiti_override.clear();
+}
+void cata_tiles::void_trap_override()
+{
+    trap_override.clear();
+}
+void cata_tiles::void_field_override()
+{
+    field_override.clear();
+}
+void cata_tiles::void_item_override()
+{
+    item_override.clear();
+}
+void cata_tiles::void_vpart_override()
+{
+    vpart_override.clear();
+}
+void cata_tiles::void_draw_below_override()
+{
+    draw_below_override.clear();
+}
+void cata_tiles::void_monster_override()
+{
+    monster_override.clear();
+}
+bool cata_tiles::has_draw_override( const tripoint &p ) const
+{
+    return radiation_override.find( p ) != radiation_override.end() ||
+           terrain_override.find( p ) != terrain_override.end() ||
+           furniture_override.find( p ) != furniture_override.end() ||
+           graffiti_override.find( p ) != graffiti_override.end() ||
+           trap_override.find( p ) != trap_override.end() ||
+           field_override.find( p ) != field_override.end() ||
+           item_override.find( p ) != item_override.end() ||
+           vpart_override.find( p ) != vpart_override.end() ||
+           draw_below_override.find( p ) != draw_below_override.end() ||
+           monster_override.find( p ) != monster_override.end();
+}
 /* -- Animation Renders */
 void cata_tiles::draw_explosion_frame()
 {
@@ -2553,7 +3135,7 @@ void cata_tiles::draw_explosion_frame()
         draw_from_id_string( exp_name, exp_pos + point( i, i ),
                              subtile, rotation++, LL_LIT, nv_goggles_activated );
         draw_from_id_string( exp_name, exp_pos + point( i, -i ),
-                             subtile, rotation++, LL_LIT, nv_goggles_activated );
+                             subtile, rotation, LL_LIT, nv_goggles_activated );
 
         subtile = edge;
         for( int j = 1 - i; j < 0 + i; j++ ) {
@@ -2703,7 +3285,7 @@ void cata_tiles::draw_sct_frame( std::multimap<point, formatted_text> &overlay_s
     for( auto iter = SCT.vSCT.begin(); iter != SCT.vSCT.end(); ++iter ) {
         const int iDX = iter->getPosX();
         const int iDY = iter->getPosY();
-        const int full_text_length = iter->getText().length();
+        const int full_text_length = utf8_width( iter->getText() );
 
         int iOffsetX = 0;
         int iOffsetY = 0;
@@ -2766,10 +3348,18 @@ void cata_tiles::init_light()
     g->reset_light_level();
 }
 
-void cata_tiles::get_terrain_orientation( const tripoint &p, int &rota, int &subtile )
+void cata_tiles::get_terrain_orientation( const tripoint &p, int &rota, int &subtile,
+        const std::map<tripoint, ter_id> &ter_override, const bool ( &invisible )[5] )
 {
+    const bool overridden = ter_override.find( p ) != ter_override.end();
+    const auto ter = [&]( const tripoint & q, const bool invis ) -> ter_id {
+        const auto override = ter_override.find( q );
+        return override != ter_override.end() ? override->second :
+        ( !overridden || !invis ) ? g->m.ter( q ) : t_null;
+    };
+
     // get terrain at x,y
-    ter_id tid = g->m.ter( p );
+    const ter_id tid = ter( p, invisible[0] );
     if( tid == t_null ) {
         subtile = 0;
         rota = 0;
@@ -2778,20 +3368,17 @@ void cata_tiles::get_terrain_orientation( const tripoint &p, int &rota, int &sub
 
     // get terrain neighborhood
     const ter_id neighborhood[4] = {
-        g->m.ter( p + point_south ),
-        g->m.ter( p + point_east ),
-        g->m.ter( p + point_west ),
-        g->m.ter( p + point_north )
+        ter( p + point_south, invisible[1] ),
+        ter( p + point_east, invisible[2] ),
+        ter( p + point_west, invisible[3] ),
+        ter( p + point_north, invisible[4] )
     };
 
-    bool connects[4];
     char val = 0;
 
     // populate connection information
     for( int i = 0; i < 4; ++i ) {
-        connects[i] = ( neighborhood[i] == tid );
-
-        if( connects[i] ) {
+        if( neighborhood[i] == tid ) {
             val += 1 << i;
         }
     }
@@ -2876,9 +3463,9 @@ void cata_tiles::get_rotation_and_subtile( const char val, int &rotation, int &s
 }
 
 void cata_tiles::get_connect_values( const tripoint &p, int &subtile, int &rotation,
-                                     int connect_group )
+                                     const int connect_group, const std::map<tripoint, ter_id> &ter_override )
 {
-    uint8_t connections = g->m.get_known_connections( p, connect_group );
+    uint8_t connections = g->m.get_known_connections( p, connect_group, ter_override );
     get_rotation_and_subtile( connections, rotation, subtile );
 }
 
@@ -2900,7 +3487,8 @@ void cata_tiles::do_tile_loading_report()
     DebugLog( D_INFO, DC_ALL ) << "Loaded tileset: " << get_option<std::string>( "TILES" );
 
     if( !g->is_core_data_loaded() ) {
-        return; // There's nothing to do anymore without the core data.
+        // There's nothing to do anymore without the core data.
+        return;
     }
 
     tile_loading_report<ter_t>( ter_t::count(), "Terrain", "" );
@@ -3026,6 +3614,21 @@ std::vector<options_manager::id_and_option> cata_tiles::build_renderer_list()
     }
 
     return renderer_names.empty() ? default_renderer_names : renderer_names;
+}
+
+std::vector<options_manager::id_and_option> cata_tiles::build_display_list()
+{
+    std::vector<options_manager::id_and_option> display_names;
+    std::vector<options_manager::id_and_option> default_display_names = {
+        { "0", translate_marker( "Display 0" ) }
+    };
+
+    int numdisplays = SDL_GetNumVideoDisplays();
+    for( int i = 0 ; i < numdisplays ; i++ ) {
+        display_names.emplace_back( std::to_string( i ), std::string( SDL_GetDisplayName( i ) ) );
+    }
+
+    return display_names.empty() ? default_display_names : display_names;
 }
 
 #endif // SDL_TILES

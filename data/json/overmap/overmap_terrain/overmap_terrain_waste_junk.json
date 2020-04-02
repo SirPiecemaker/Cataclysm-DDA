@@ -97,39 +97,80 @@
     "name": "toxic waste dump",
     "sym": "D",
     "color": "pink",
-    "see_cost": 2
+    "see_cost": 2,
+    "flags": [ "RISK_HIGH" ]
   },
   {
     "type": "overmap_terrain",
-    "id": "haz_sar_entrance",
+    "id": "haz_sar_1_1",
     "name": "hazardous waste sarcophagus",
     "sym": "X",
     "color": "pink",
-    "see_cost": 5
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
   },
   {
     "type": "overmap_terrain",
-    "id": "haz_sar",
+    "id": "haz_sar_1_2",
     "name": "hazardous waste sarcophagus",
     "sym": "X",
     "color": "pink",
-    "see_cost": 5
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
   },
   {
     "type": "overmap_terrain",
-    "id": "haz_sar_entrance_b1",
+    "id": "haz_sar_1_3",
     "name": "hazardous waste sarcophagus",
     "sym": "X",
     "color": "pink",
-    "see_cost": 5
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
   },
   {
     "type": "overmap_terrain",
-    "id": "haz_sar_b1",
+    "id": "haz_sar_1_4",
     "name": "hazardous waste sarcophagus",
     "sym": "X",
     "color": "pink",
-    "see_cost": 5
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
+  },
+  {
+    "type": "overmap_terrain",
+    "id": "haz_sar_b_1",
+    "name": "hazardous waste sarcophagus",
+    "sym": "X",
+    "color": "pink",
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
+  },
+  {
+    "type": "overmap_terrain",
+    "id": "haz_sar_b_2",
+    "name": "hazardous waste sarcophagus",
+    "sym": "X",
+    "color": "pink",
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
+  },
+  {
+    "type": "overmap_terrain",
+    "id": "haz_sar_b_3",
+    "name": "hazardous waste sarcophagus",
+    "sym": "X",
+    "color": "pink",
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
+  },
+  {
+    "type": "overmap_terrain",
+    "id": "haz_sar_b_4",
+    "name": "hazardous waste sarcophagus",
+    "sym": "X",
+    "color": "pink",
+    "see_cost": 5,
+    "flags": [ "RISK_HIGH" ]
   },
   {
     "type": "overmap_terrain",
@@ -216,7 +257,8 @@
     "copy-from": "generic_city_building_no_sidewalk",
     "name": "dump",
     "sym": "D",
-    "color": "i_brown"
+    "color": "i_brown",
+    "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION" ]
   },
   {
     "type": "overmap_terrain",
@@ -224,7 +266,8 @@
     "copy-from": "generic_city_building",
     "name": "recycle center",
     "sym": "R",
-    "color": "i_green"
+    "color": "i_green",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION" ] }
   },
   {
     "type": "overmap_terrain",
@@ -240,7 +283,8 @@
     "copy-from": "generic_city_building",
     "name": "recycle center",
     "sym": "R",
-    "color": "i_green"
+    "color": "i_green",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION" ] }
   },
   {
     "type": "overmap_terrain",
@@ -256,7 +300,8 @@
     "copy-from": "generic_city_building",
     "name": "recycle center",
     "sym": "R",
-    "color": "i_green"
+    "color": "i_green",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION" ] }
   },
   {
     "type": "overmap_terrain",
@@ -280,7 +325,17 @@
     "copy-from": "generic_city_building",
     "name": "junkyard",
     "sym": "J",
-    "color": "i_brown"
+    "color": "i_brown",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ] }
+  },
+  {
+    "type": "overmap_terrain",
+    "id": "junkyard_roof_1a",
+    "copy-from": "generic_city_building",
+    "name": "junkyard",
+    "sym": "J",
+    "color": "i_brown",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ] }
   },
   {
     "type": "overmap_terrain",
@@ -288,7 +343,17 @@
     "copy-from": "generic_city_building",
     "name": "junkyard",
     "sym": "J",
-    "color": "i_brown"
+    "color": "i_brown",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ] }
+  },
+  {
+    "type": "overmap_terrain",
+    "id": "junkyard_roof_1b",
+    "copy-from": "generic_city_building",
+    "name": "junkyard",
+    "sym": "J",
+    "color": "i_brown",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ] }
   },
   {
     "type": "overmap_terrain",
@@ -296,7 +361,8 @@
     "copy-from": "generic_city_building",
     "name": "junkyard",
     "sym": "J",
-    "color": "i_brown"
+    "color": "i_brown",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ] }
   },
   {
     "type": "overmap_terrain",
@@ -304,7 +370,8 @@
     "copy-from": "generic_city_building",
     "name": "junkyard",
     "sym": "J",
-    "color": "i_brown"
+    "color": "i_brown",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ] }
   },
   {
     "type": "overmap_terrain",
@@ -312,7 +379,8 @@
     "copy-from": "generic_city_building_no_sidewalk",
     "name": "regional dump",
     "sym": "d",
-    "color": "i_brown"
+    "color": "i_brown",
+    "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ]
   },
   {
     "type": "overmap_terrain",
@@ -400,7 +468,8 @@
     "copy-from": "generic_city_building_no_sidewalk",
     "name": "small scrap yard",
     "sym": "s",
-    "color": "red"
+    "color": "red",
+    "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ]
   },
   {
     "type": "overmap_terrain",
@@ -416,7 +485,8 @@
     "copy-from": "generic_city_building",
     "name": "small dump",
     "sym": "d",
-    "color": "i_brown"
+    "color": "i_brown",
+    "extend": { "flags": [ "SOURCE_FABRICATION", "SOURCE_CONSTRUCTION", "SOURCE_VEHICLES" ] }
   },
   {
     "type": "overmap_terrain",

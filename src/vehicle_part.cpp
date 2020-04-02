@@ -25,8 +25,9 @@
 #include "enums.h"
 #include "flat_set.h"
 
-static const itype_id fuel_type_none( "null" );
 static const itype_id fuel_type_battery( "battery" );
+static const itype_id fuel_type_none( "null" );
+
 /*-----------------------------------------------------------------------------
  *                              VEHICLE_PART
  *-----------------------------------------------------------------------------*/
@@ -70,7 +71,8 @@ item vehicle_part::properties_to_item() const
     if( tmp.has_flag( "CABLE_SPOOL" ) ) {
         const tripoint local_pos = g->m.getlocal( target.first );
         if( !g->m.veh_at( local_pos ) ) {
-            tmp.item_tags.insert( "NO_DROP" ); // That vehicle ain't there no more.
+            // That vehicle ain't there no more.
+            tmp.item_tags.insert( "NO_DROP" );
         }
 
         tmp.set_var( "source_x", target.first.x );
@@ -80,6 +82,9 @@ item vehicle_part::properties_to_item() const
         tmp.active = true;
     }
 
+    // force rationalization of damage values to the middle value of each damage level so
+    // that parts will stack nicely
+    tmp.set_damage( tmp.damage_level( 4 ) * itype::damage_scale );
     return tmp;
 }
 
@@ -102,9 +107,12 @@ std::string vehicle_part::name( bool with_prefix ) const
         res += string_format( _( " holding %s" ), base.get_var( "contained_name" ) );
     }
 
+    if( is_leaking() ) {
+        res += _( " (draining)" );
+    }
+
     if( with_prefix ) {
-        res.insert( 0, "<color_" + string_from_color( this->base.damage_color() ) + ">" +
-                    this->base.damage_symbol() + "</color> " );
+        res.insert( 0, colorize( base.damage_symbol(), base.damage_color() ) + " " );
     }
     return res;
 }
@@ -122,6 +130,11 @@ int vehicle_part::hp() const
 int vehicle_part::damage() const
 {
     return base.damage();
+}
+
+int vehicle_part::max_damage() const
+{
+    return base.max_damage();
 }
 
 int vehicle_part::damage_level( int max ) const
@@ -474,6 +487,11 @@ bool vehicle_part::is_reactor() const
     return info().has_flag( VPFLAG_REACTOR );
 }
 
+bool vehicle_part::is_leaking() const
+{
+    return  health_percent() <= 0.5 && ( is_tank() || is_battery() || is_reactor() );
+}
+
 bool vehicle_part::is_turret() const
 {
     return base.is_gun();
@@ -554,7 +572,8 @@ bool vehicle::assign_seat( vehicle_part &pt, const npc &who )
     // NPC's can only be assigned to one seat in the vehicle
     for( auto &e : parts ) {
         if( &e == &pt ) {
-            continue; // skip this part
+            // skip this part
+            continue;
         }
 
         if( e.is_seat() ) {
@@ -566,4 +585,12 @@ bool vehicle::assign_seat( vehicle_part &pt, const npc &who )
     }
 
     return true;
+}
+
+std::string vehicle_part::carried_name() const
+{
+    if( carry_names.empty() ) {
+        return std::string();
+    }
+    return carry_names.top().substr( name_offset );
 }

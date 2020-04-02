@@ -64,12 +64,12 @@ enum class event_type {
     game_start,
     installs_cbm,
     installs_faulty_cbm,
-    launches_nuke,
     learns_martial_art,
     loses_addiction,
     npc_becomes_hostile,
     opens_portal,
     opens_temple,
+    player_levels_spell,
     releases_subspace_specimens,
     removes_cbm,
     seals_hazardous_material_sarcophagus,
@@ -398,7 +398,7 @@ struct event_spec<event_type::gains_skill_level> {
 };
 
 template<>
-struct event_spec<event_type::game_over> : event_spec_empty {
+struct event_spec<event_type::game_over> {
     static constexpr std::array<std::pair<const char *, cata_variant_type>, 2> fields = {{
             { "is_suicide", cata_variant_type::bool_ },
             { "last_words", cata_variant_type::string },
@@ -407,7 +407,12 @@ struct event_spec<event_type::game_over> : event_spec_empty {
 };
 
 template<>
-struct event_spec<event_type::game_start> : event_spec_empty {};
+struct event_spec<event_type::game_start> {
+    static constexpr std::array<std::pair<const char *, cata_variant_type>, 1> fields = {{
+            { "avatar_id", cata_variant_type::character_id },
+        }
+    };
+};
 
 template<>
 struct event_spec<event_type::installs_cbm> {
@@ -423,14 +428,6 @@ struct event_spec<event_type::installs_faulty_cbm> {
     static constexpr std::array<std::pair<const char *, cata_variant_type>, 2> fields = {{
             { "character", cata_variant_type::character_id },
             { "bionic", cata_variant_type::bionic_id },
-        }
-    };
-};
-
-template<>
-struct event_spec<event_type::launches_nuke> {
-    static constexpr std::array<std::pair<const char *, cata_variant_type>, 1> fields = {{
-            { "target_terrain", cata_variant_type::oter_id },
         }
     };
 };
@@ -470,6 +467,15 @@ struct event_spec<event_type::opens_temple> : event_spec_empty {};
 
 template<>
 struct event_spec<event_type::releases_subspace_specimens> : event_spec_empty {};
+
+template<>
+struct event_spec<event_type::player_levels_spell> {
+    static constexpr std::array<std::pair<const char *, cata_variant_type>, 2> fields = {{
+            { "spell", cata_variant_type::spell_id },
+            { "new_level", cata_variant_type::int_ },
+        }
+    };
+};
 
 template<>
 struct event_spec<event_type::removes_cbm> {
@@ -546,6 +552,8 @@ class event
                    Type, std::make_index_sequence<sizeof...( Args )>
                    > ()( calendar::turn, std::forward<Args>( args )... );
         }
+
+        static std::map<std::string, cata_variant_type> get_fields( event_type );
 
         event_type type() const {
             return type_;

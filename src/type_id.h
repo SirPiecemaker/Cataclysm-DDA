@@ -8,8 +8,16 @@
 class ammunition_type;
 using ammotype = string_id<ammunition_type>;
 
+struct ammo_effect;
+using ammo_effect_id = int_id<ammo_effect>;
+using ammo_effect_str_id = string_id<ammo_effect>;
+
 struct bionic_data;
 using bionic_id = string_id<bionic_data>;
+
+struct body_part_type;
+using bodypart_id = int_id<body_part_type>;
+using bodypart_str_id = string_id<body_part_type>;
 
 struct construction_category;
 using construction_category_id = string_id<construction_category>;
@@ -20,8 +28,14 @@ using clothing_mod_id = string_id<clothing_mod>;
 class effect_type;
 using efftype_id = string_id<effect_type>;
 
+class scent_type;
+using scenttype_id = string_id<scent_type>;
+
 class emit;
 using emit_id = string_id<emit>;
+
+class enchantment;
+using enchantment_id = string_id<enchantment>;
 
 class fault;
 using fault_id = string_id<fault>;
@@ -39,6 +53,9 @@ using gun_mode_id = string_id<gun_mode>;
 
 class harvest_list;
 using harvest_id = string_id<harvest_list>;
+
+class item_category;
+using item_category_id = string_id<item_category>;
 
 class ma_buff;
 using mabuff_id = string_id<ma_buff>;
@@ -73,6 +90,9 @@ using mtype_id = string_id<mtype>;
 
 class npc_class;
 using npc_class_id = string_id<npc_class>;
+
+class faction;
+using faction_id = string_id<faction>;
 
 struct oter_t;
 using oter_id = int_id<oter_t>;
@@ -136,5 +156,12 @@ using vproto_id = string_id<vehicle_prototype>;
 
 class zone_type;
 using zone_type_id = string_id<zone_type>;
+
+class translation;
+using snippet_id = string_id<translation>;
+
+struct construction;
+using construction_id = int_id<construction>;
+using construction_str_id = string_id<construction>;
 
 #endif // TYPE_ID_H

@@ -32,7 +32,7 @@
 
 #define dbg(x) DebugLog((x),D_GAME) << __FILE__ << ":" << __LINE__ << ": "
 
-mission mission_type::create( const character_id npc_id ) const
+mission mission_type::create( const character_id &npc_id ) const
 {
     mission ret;
     ret.uid = g->assign_mission_id();
@@ -57,12 +57,12 @@ mission mission_type::create( const character_id npc_id ) const
 
 std::string mission_type::tname() const
 {
-    return _( name );
+    return name.translated();
 }
 
 static std::unordered_map<int, mission> world_missions;
 
-mission *mission::reserve_new( const mission_type_id &type, const character_id npc_id )
+mission *mission::reserve_new( const mission_type_id &type, const character_id &npc_id )
 {
     const auto tmp = mission_type::get( type )->create( npc_id );
     // TODO: Warn about overwrite?
@@ -184,7 +184,7 @@ void mission::on_creature_death( Creature &poor_dead_dude )
     }
 }
 
-void mission::on_talk_with_npc( const character_id npc_id )
+void mission::on_talk_with_npc( const character_id &npc_id )
 {
     switch( type->goal ) {
         case MGOAL_TALK_TO_NPC:
@@ -200,7 +200,7 @@ void mission::on_talk_with_npc( const character_id npc_id )
 }
 
 mission *mission::reserve_random( const mission_origin origin, const tripoint &p,
-                                  const character_id npc_id )
+                                  const character_id &npc_id )
 {
     const auto type = mission_type::get_random_id( origin, p );
     if( type.is_null() ) {
@@ -339,7 +339,7 @@ void mission::wrap_up()
     type->end( this );
 }
 
-bool mission::is_complete( const character_id _npc_id ) const
+bool mission::is_complete( const character_id &_npc_id ) const
 {
     if( status == mission_status::success ) {
         return true;
@@ -372,7 +372,7 @@ bool mission::is_complete( const character_id _npc_id ) const
 
             int total_match = std::accumulate( matches.begin(), matches.end(), 0,
             []( const std::size_t previous, const std::pair<const std::string, std::size_t> &p ) {
-                return previous + p.second;
+                return static_cast<int>( previous + p.second );
             } );
 
             if( total_match >= ( type->item_count ) ) {
@@ -519,7 +519,7 @@ time_point mission::get_deadline() const
 
 std::string mission::get_description() const
 {
-    return _( type->description );
+    return type->description.translated();
 }
 
 bool mission::has_target() const
@@ -610,7 +610,7 @@ void mission::set_target( const tripoint &p )
     target = p;
 }
 
-void mission::set_target_npc_id( const character_id npc_id )
+void mission::set_target_npc_id( const character_id &npc_id )
 {
     target_npc_id = npc_id;
 }
@@ -673,7 +673,7 @@ std::string mission::dialogue_for_topic( const std::string &in_topic ) const
 
     const auto &response = type->dialogue.find( topic );
     if( response != type->dialogue.end() ) {
-        return _( response->second );
+        return response->second.translated();
     }
 
     return string_format( "Someone forgot to code this message id is %s, topic is %s!",
@@ -700,18 +700,6 @@ mission::mission()
     bad_fac_id = -1;
     step = 0;
     player_id = character_id();
-}
-
-mission_type::mission_type( mission_type_id ID, const std::string &NAME, mission_goal GOAL, int DIF,
-                            int VAL,
-                            bool URGENT,
-                            std::function<bool( const tripoint & )> PLACE,
-                            std::function<void( mission * )> START,
-                            std::function<void( mission * )> END,
-                            std::function<void( mission * )> FAIL ) :
-    id( ID ), name( NAME ), goal( GOAL ), difficulty( DIF ), value( VAL ),
-    urgent( URGENT ), place( PLACE ), start( START ), end( END ), fail( FAIL )
-{
 }
 
 namespace io

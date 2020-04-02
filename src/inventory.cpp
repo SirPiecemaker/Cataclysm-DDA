@@ -34,6 +34,11 @@
 #include "flat_set.h"
 #include "point.h"
 
+static const std::string flag_LEAK_ALWAYS( "LEAK_ALWAYS" );
+static const std::string flag_LEAK_DAM( "LEAK_DAM" );
+static const std::string flag_WATERPROOF( "WATERPROOF" );
+static const std::string flag_WATERPROOF_GUN( "WATERPROOF_GUN" );
+
 struct itype;
 
 const invlet_wrapper
@@ -391,13 +396,25 @@ static int count_charges_in_list( const itype *type, const map_stack &items )
     return 0;
 }
 
-void inventory::form_from_map( const tripoint &origin, int range, bool assign_invlet,
+void inventory::form_from_map( const tripoint &origin, int range, const Character *pl,
+                               bool assign_invlet,
                                bool clear_path )
 {
-    form_from_map( g->m, origin, range, assign_invlet, clear_path );
+    form_from_map( g->m, origin, range, pl, assign_invlet, clear_path );
 }
 
-void inventory::form_from_map( map &m, const tripoint &origin, int range, bool assign_invlet,
+void inventory::form_from_zone( map &m, std::unordered_set<tripoint> &zone_pts, const Character *pl,
+                                bool assign_invlet )
+{
+    std::vector<tripoint> pts;
+    for( const tripoint &elem : zone_pts ) {
+        pts.push_back( m.getlocal( elem ) );
+    }
+    form_from_map( m, pts, pl, assign_invlet );
+}
+
+void inventory::form_from_map( map &m, const tripoint &origin, int range, const Character *pl,
+                               bool assign_invlet,
                                bool clear_path )
 {
     // populate a grid of spots that can be reached
@@ -412,9 +429,14 @@ void inventory::form_from_map( map &m, const tripoint &origin, int range, bool a
             reachable_pts.emplace_back( p );
         }
     }
+    form_from_map( m, reachable_pts, pl, assign_invlet );
+}
 
+void inventory::form_from_map( map &m, std::vector<tripoint> pts, const Character *pl,
+                               bool assign_invlet )
+{
     items.clear();
-    for( const tripoint &p : reachable_pts ) {
+    for( const tripoint &p : pts ) {
         if( m.has_furn( p ) ) {
             const furn_t &f = m.furn( p ).obj();
             const itype *type = f.crafting_pseudo_item_type();
@@ -428,6 +450,11 @@ void inventory::form_from_map( map &m, const tripoint &origin, int range, bool a
         }
         if( m.accessible_items( p ) ) {
             for( auto &i : m.i_at( p ) ) {
+                // if it's *the* player requesting this from from map inventory
+                // then don't allow items owned by another faction to be factored into recipe components etc.
+                if( pl && !i.is_owned_by( *pl, true ) ) {
+                    continue;
+                }
                 if( !i.made_of( LIQUID ) ) {
                     add_item( i, false, assign_invlet );
                 }
@@ -565,18 +592,18 @@ void inventory::form_from_map( map &m, const tripoint &origin, int range, bool a
             add_item( kiln );
         }
         if( chempart ) {
-            item hotplate( "hotplate", 0 );
-            hotplate.charges = veh->fuel_left( "battery", true );
-            hotplate.item_tags.insert( "PSEUDO" );
-            add_item( hotplate );
-
             item chemistry_set( "chemistry_set", 0 );
             chemistry_set.charges = veh->fuel_left( "battery", true );
             chemistry_set.item_tags.insert( "PSEUDO" );
             add_item( chemistry_set );
+
+            item electrolysis_kit( "electrolysis_kit", 0 );
+            electrolysis_kit.charges = veh->fuel_left( "battery", true );
+            electrolysis_kit.item_tags.insert( "PSEUDO" );
+            add_item( electrolysis_kit );
         }
     }
-    reachable_pts.clear();
+    pts.clear();
 }
 
 std::list<item> inventory::reduce_stack( const int position, const int quantity )
@@ -785,9 +812,9 @@ int inventory::leak_level( const std::string &flag ) const
     for( const auto &elem : items ) {
         for( const auto &elem_stack_iter : elem ) {
             if( elem_stack_iter.has_flag( flag ) ) {
-                if( elem_stack_iter.has_flag( "LEAK_ALWAYS" ) ) {
+                if( elem_stack_iter.has_flag( flag_LEAK_ALWAYS ) ) {
                     ret += elem_stack_iter.volume() / units::legacy_volume_factor;
-                } else if( elem_stack_iter.has_flag( "LEAK_DAM" ) && elem_stack_iter.damage() > 0 ) {
+                } else if( elem_stack_iter.has_flag( flag_LEAK_DAM ) && elem_stack_iter.damage() > 0 ) {
                     ret += elem_stack_iter.damage_level( 4 );
                 }
             }
@@ -854,15 +881,15 @@ void inventory::rust_iron_items()
     for( auto &elem : items ) {
         for( auto &elem_stack_iter : elem ) {
             if( elem_stack_iter.made_of( material_id( "iron" ) ) &&
-                !elem_stack_iter.has_flag( "WATERPROOF_GUN" ) &&
-                !elem_stack_iter.has_flag( "WATERPROOF" ) &&
+                !elem_stack_iter.has_flag( flag_WATERPROOF_GUN ) &&
+                !elem_stack_iter.has_flag( flag_WATERPROOF ) &&
                 elem_stack_iter.damage() < elem_stack_iter.max_damage() / 2 &&
                 //Passivation layer prevents further rusting
                 one_in( 500 ) &&
                 //Scale with volume, bigger = slower (see #24204)
                 one_in( static_cast<int>( 14 * std::cbrt( 0.5 * std::max( 0.05,
                                           static_cast<double>( elem_stack_iter.base_volume().value() ) / 250 ) ) ) ) &&
-                //                       ^season length   ^14/5*0.75/3.14 (from volume of sphere)
+                //                       ^season length   ^14/5*0.75/pi (from volume of sphere)
                 g->m.water_from( g->u.pos() ).typeId() ==
                 "salt_water" ) { //Freshwater without oxygen rusts slower than air
                 elem_stack_iter.inc_damage( DT_ACID ); // rusting never completely destroys an item
@@ -975,6 +1002,21 @@ std::vector<item *> inventory::active_items()
         }
     }
     return ret;
+}
+
+enchantment inventory::get_active_enchantment_cache( const Character &owner ) const
+{
+    enchantment temp_cache;
+    for( const std::list<item> &elem : items ) {
+        for( const item &check_item : elem ) {
+            for( const enchantment &ench : check_item.get_enchantments() ) {
+                if( ench.is_active( owner, check_item ) ) {
+                    temp_cache.force_add( ench );
+                }
+            }
+        }
+    }
+    return temp_cache;
 }
 
 void inventory::assign_empty_invlet( item &it, const Character &p, const bool force )
@@ -1096,7 +1138,7 @@ const itype_bin &inventory::get_binned_items() const
 
     binned_items.clear();
 
-    // Hack warning
+    // HACK: Hack warning
     inventory *this_nonconst = const_cast<inventory *>( this );
     this_nonconst->visit_items( [ this ]( item * e ) {
         binned_items[ e->typeId() ].push_back( e );

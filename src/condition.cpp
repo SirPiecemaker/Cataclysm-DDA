@@ -20,17 +20,19 @@
 #include "map.h"
 #include "mission.h"
 #include "npc.h"
+#include "overmap.h"
 #include "overmapbuffer.h"
 #include "recipe.h"
+#include "recipe_groups.h"
 #include "string_id.h"
 #include "type_id.h"
 #include "vehicle.h"
 #include "vpart_position.h"
 
-const efftype_id effect_currently_busy( "currently_busy" );
+static const efftype_id effect_currently_busy( "currently_busy" );
 
 // throws an error on failure, so no need to return
-std::string get_talk_varname( JsonObject jo, const std::string &member, bool check_value )
+std::string get_talk_varname( const JsonObject &jo, const std::string &member, bool check_value )
 {
     if( !jo.has_string( "type" ) || !jo.has_string( "context" ) ||
         ( check_value && !jo.has_string( "value" ) ) ) {
@@ -43,7 +45,7 @@ std::string get_talk_varname( JsonObject jo, const std::string &member, bool che
 }
 
 template<class T>
-void read_condition( JsonObject &jo, const std::string &member_name,
+void read_condition( const JsonObject &jo, const std::string &member_name,
                      std::function<bool( const T & )> &condition, bool default_val )
 {
     const auto null_function = [default_val]( const T & ) {
@@ -59,7 +61,7 @@ void read_condition( JsonObject &jo, const std::string &member_name,
             return sub_condition( d );
         };
     } else if( jo.has_object( member_name ) ) {
-        const JsonObject con_obj = jo.get_object( member_name );
+        JsonObject con_obj = jo.get_object( member_name );
         conditional_t<T> sub_condition( con_obj );
         condition = [sub_condition]( const T & d ) {
             return sub_condition( d );
@@ -70,7 +72,8 @@ void read_condition( JsonObject &jo, const std::string &member_name,
 }
 
 template<class T>
-void conditional_t<T>::set_has_any_trait( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_any_trait( const JsonObject &jo, const std::string &member,
+        bool is_npc )
 {
     std::vector<trait_id> traits_to_check;
     for( auto&& f : jo.get_string_array( member ) ) { // *NOPAD*
@@ -91,7 +94,7 @@ void conditional_t<T>::set_has_any_trait( JsonObject &jo, const std::string &mem
 }
 
 template<class T>
-void conditional_t<T>::set_has_trait( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_trait( const JsonObject &jo, const std::string &member, bool is_npc )
 {
     const std::string &trait_to_check = jo.get_string( member );
     condition = [trait_to_check, is_npc]( const T & d ) {
@@ -104,7 +107,8 @@ void conditional_t<T>::set_has_trait( JsonObject &jo, const std::string &member,
 }
 
 template<class T>
-void conditional_t<T>::set_has_trait_flag( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_trait_flag( const JsonObject &jo, const std::string &member,
+        bool is_npc )
 {
     const std::string &trait_flag_to_check = jo.get_string( member );
     condition = [trait_flag_to_check, is_npc]( const T & d ) {
@@ -136,7 +140,15 @@ void conditional_t<T>::set_has_activity( bool is_npc )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_has_class( JsonObject &jo )
+void conditional_t<T>::set_is_riding( bool is_npc )
+{
+    condition = [is_npc]( const T & d ) {
+        return ( is_npc ? d.beta : d.alpha )->is_mounted();
+    };
+}
+
+template<class T>
+void conditional_t<T>::set_npc_has_class( const JsonObject &jo )
 {
     const std::string &class_to_check = jo.get_string( "npc_has_class" );
     condition = [class_to_check]( const T & d ) {
@@ -145,7 +157,7 @@ void conditional_t<T>::set_npc_has_class( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_u_has_mission( JsonObject &jo )
+void conditional_t<T>::set_u_has_mission( const JsonObject &jo )
 {
     const std::string &mission = jo.get_string( "u_has_mission" );
     condition = [mission]( const T & ) {
@@ -159,7 +171,8 @@ void conditional_t<T>::set_u_has_mission( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_has_strength( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_strength( const JsonObject &jo, const std::string &member,
+        bool is_npc )
 {
     const int min_strength = jo.get_int( member );
     condition = [min_strength, is_npc]( const T & d ) {
@@ -172,7 +185,8 @@ void conditional_t<T>::set_has_strength( JsonObject &jo, const std::string &memb
 }
 
 template<class T>
-void conditional_t<T>::set_has_dexterity( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_dexterity( const JsonObject &jo, const std::string &member,
+        bool is_npc )
 {
     const int min_dexterity = jo.get_int( member );
     condition = [min_dexterity, is_npc]( const T & d ) {
@@ -185,7 +199,7 @@ void conditional_t<T>::set_has_dexterity( JsonObject &jo, const std::string &mem
 }
 
 template<class T>
-void conditional_t<T>::set_has_intelligence( JsonObject &jo, const std::string &member,
+void conditional_t<T>::set_has_intelligence( const JsonObject &jo, const std::string &member,
         bool is_npc )
 {
     const int min_intelligence = jo.get_int( member );
@@ -199,7 +213,8 @@ void conditional_t<T>::set_has_intelligence( JsonObject &jo, const std::string &
 }
 
 template<class T>
-void conditional_t<T>::set_has_perception( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_perception( const JsonObject &jo, const std::string &member,
+        bool is_npc )
 {
     const int min_perception = jo.get_int( member );
     condition = [min_perception, is_npc]( const T & d ) {
@@ -212,7 +227,8 @@ void conditional_t<T>::set_has_perception( JsonObject &jo, const std::string &me
 }
 
 template<class T>
-void conditional_t<T>::set_is_wearing( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_is_wearing( const JsonObject &jo, const std::string &member,
+                                       bool is_npc )
 {
     const std::string &item_id = jo.get_string( member );
     condition = [item_id, is_npc]( const T & d ) {
@@ -225,7 +241,7 @@ void conditional_t<T>::set_is_wearing( JsonObject &jo, const std::string &member
 }
 
 template<class T>
-void conditional_t<T>::set_has_item( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_item( const JsonObject &jo, const std::string &member, bool is_npc )
 {
     const std::string &item_id = jo.get_string( member );
     condition = [item_id, is_npc]( const T & d ) {
@@ -238,7 +254,7 @@ void conditional_t<T>::set_has_item( JsonObject &jo, const std::string &member, 
 }
 
 template<class T>
-void conditional_t<T>::set_has_items( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_items( const JsonObject &jo, const std::string &member, bool is_npc )
 {
     JsonObject has_items = jo.get_object( member );
     if( !has_items.has_string( "item" ) || !has_items.has_int( "count" ) ) {
@@ -259,10 +275,10 @@ void conditional_t<T>::set_has_items( JsonObject &jo, const std::string &member,
 }
 
 template<class T>
-void conditional_t<T>::set_has_item_category( JsonObject &jo, const std::string &member,
+void conditional_t<T>::set_has_item_category( const JsonObject &jo, const std::string &member,
         bool is_npc )
 {
-    const std::string category_id = jo.get_string( member );
+    const item_category_id category_id = item_category_id( jo.get_string( member ) );
 
     size_t count = 1;
     if( jo.has_int( "count" ) ) {
@@ -278,14 +294,15 @@ void conditional_t<T>::set_has_item_category( JsonObject &jo, const std::string 
             actor = dynamic_cast<player *>( d.beta );
         }
         const auto items_with = actor->items_with( [category_id]( const item & it ) {
-            return it.get_category().id() == category_id;
+            return it.get_category().get_id() == category_id;
         } );
         return items_with.size() >= count;
     };
 }
 
 template<class T>
-void conditional_t<T>::set_has_bionics( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_bionics( const JsonObject &jo, const std::string &member,
+                                        bool is_npc )
 {
     const std::string bionics_id = jo.get_string( member );
     condition = [bionics_id, is_npc]( const T & d ) {
@@ -294,15 +311,15 @@ void conditional_t<T>::set_has_bionics( JsonObject &jo, const std::string &membe
             actor = dynamic_cast<player *>( d.beta );
         }
         if( bionics_id == "ANY" ) {
-            return actor->num_bionics() > 0 || actor->max_power_level > 0;
+            return actor->num_bionics() > 0 || actor->has_max_power();
         }
         return actor->has_bionic( bionic_id( bionics_id ) );
     };
 }
 
-
 template<class T>
-void conditional_t<T>::set_has_effect( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_effect( const JsonObject &jo, const std::string &member,
+                                       bool is_npc )
 {
     const std::string &effect_id = jo.get_string( member );
     condition = [effect_id, is_npc]( const T & d ) {
@@ -315,7 +332,7 @@ void conditional_t<T>::set_has_effect( JsonObject &jo, const std::string &member
 }
 
 template<class T>
-void conditional_t<T>::set_need( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_need( const JsonObject &jo, const std::string &member, bool is_npc )
 {
     const std::string &need = jo.get_string( member );
     int amount = 0;
@@ -340,7 +357,8 @@ void conditional_t<T>::set_need( JsonObject &jo, const std::string &member, bool
 }
 
 template<class T>
-void conditional_t<T>::set_at_om_location( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_at_om_location( const JsonObject &jo, const std::string &member,
+        bool is_npc )
 {
     const std::string &location = jo.get_string( member );
     condition = [location, is_npc]( const T & d ) {
@@ -349,7 +367,7 @@ void conditional_t<T>::set_at_om_location( JsonObject &jo, const std::string &me
             actor = dynamic_cast<player *>( d.beta );
         }
         const tripoint omt_pos = actor->global_omt_location();
-        oter_id &omt_ref = overmap_buffer.ter( omt_pos );
+        const oter_id &omt_ref = overmap_buffer.ter( omt_pos );
 
         if( location == "FACTION_CAMP_ANY" ) {
             cata::optional<basecamp *> bcp = overmap_buffer.find_camp( omt_pos.xy() );
@@ -359,14 +377,17 @@ void conditional_t<T>::set_at_om_location( JsonObject &jo, const std::string &me
             // legacy check
             const std::string &omt_str = omt_ref.id().c_str();
             return omt_str.find( "faction_base_camp" ) != std::string::npos;
+        } else if( location == "FACTION_CAMP_START" ) {
+            return !recipe_group::get_recipes_by_id( "all_faction_base_types",
+                    omt_ref.id().c_str() ).empty();
         } else {
-            return omt_ref == oter_id( location );
+            return omt_ref == oter_id( oter_no_dir( oter_id( location ) ) );
         }
     };
 }
 
 template<class T>
-void conditional_t<T>::set_has_var( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_var( const JsonObject &jo, const std::string &member, bool is_npc )
 {
     const std::string var_name = get_talk_varname( jo, member, false );
     const std::string &value = jo.get_string( "value" );
@@ -379,9 +400,9 @@ void conditional_t<T>::set_has_var( JsonObject &jo, const std::string &member, b
     };
 }
 
-
 template<class T>
-void conditional_t<T>::set_compare_var( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_compare_var( const JsonObject &jo, const std::string &member,
+                                        bool is_npc )
 {
     const std::string var_name = get_talk_varname( jo, member, false );
     const std::string &op = jo.get_string( "op" );
@@ -422,7 +443,7 @@ void conditional_t<T>::set_compare_var( JsonObject &jo, const std::string &membe
 }
 
 template<class T>
-void conditional_t<T>::set_npc_role_nearby( JsonObject &jo )
+void conditional_t<T>::set_npc_role_nearby( const JsonObject &jo )
 {
     const std::string &role = jo.get_string( "npc_role_nearby" );
     condition = [role]( const T & d ) {
@@ -435,7 +456,7 @@ void conditional_t<T>::set_npc_role_nearby( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_allies( JsonObject &jo )
+void conditional_t<T>::set_npc_allies( const JsonObject &jo )
 {
     const unsigned int min_allies = jo.get_int( "npc_allies" );
     condition = [min_allies]( const T & ) {
@@ -444,7 +465,7 @@ void conditional_t<T>::set_npc_allies( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_u_has_cash( JsonObject &jo )
+void conditional_t<T>::set_u_has_cash( const JsonObject &jo )
 {
     const int min_cash = jo.get_int( "u_has_cash" );
     condition = [min_cash]( const T & d ) {
@@ -453,7 +474,7 @@ void conditional_t<T>::set_u_has_cash( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_u_are_owed( JsonObject &jo )
+void conditional_t<T>::set_u_are_owed( const JsonObject &jo )
 {
     const int min_debt = jo.get_int( "u_are_owed" );
     condition = [min_debt]( const T & d ) {
@@ -462,7 +483,7 @@ void conditional_t<T>::set_u_are_owed( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_aim_rule( JsonObject &jo )
+void conditional_t<T>::set_npc_aim_rule( const JsonObject &jo )
 {
     const std::string &setting = jo.get_string( "npc_aim_rule" );
     condition = [setting]( const T & d ) {
@@ -475,7 +496,7 @@ void conditional_t<T>::set_npc_aim_rule( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_engagement_rule( JsonObject &jo )
+void conditional_t<T>::set_npc_engagement_rule( const JsonObject &jo )
 {
     const std::string &setting = jo.get_string( "npc_engagement_rule" );
     condition = [setting]( const T & d ) {
@@ -488,7 +509,7 @@ void conditional_t<T>::set_npc_engagement_rule( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_cbm_reserve_rule( JsonObject &jo )
+void conditional_t<T>::set_npc_cbm_reserve_rule( const JsonObject &jo )
 {
     const std::string &setting = jo.get_string( "npc_cbm_reserve_rule" );
     condition = [setting]( const T & d ) {
@@ -501,7 +522,7 @@ void conditional_t<T>::set_npc_cbm_reserve_rule( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_cbm_recharge_rule( JsonObject &jo )
+void conditional_t<T>::set_npc_cbm_recharge_rule( const JsonObject &jo )
 {
     const std::string &setting = jo.get_string( "npc_cbm_recharge_rule" );
     condition = [setting]( const T & d ) {
@@ -514,7 +535,7 @@ void conditional_t<T>::set_npc_cbm_recharge_rule( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_rule( JsonObject &jo )
+void conditional_t<T>::set_npc_rule( const JsonObject &jo )
 {
     std::string rule = jo.get_string( "npc_rule" );
     condition = [rule]( const T & d ) {
@@ -527,7 +548,7 @@ void conditional_t<T>::set_npc_rule( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_npc_override( JsonObject &jo )
+void conditional_t<T>::set_npc_override( const JsonObject &jo )
 {
     std::string rule = jo.get_string( "npc_override" );
     condition = [rule]( const T & d ) {
@@ -540,7 +561,7 @@ void conditional_t<T>::set_npc_override( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_days_since( JsonObject &jo )
+void conditional_t<T>::set_days_since( const JsonObject &jo )
 {
     const unsigned int days = jo.get_int( "days_since_cataclysm" );
     condition = [days]( const T & ) {
@@ -549,7 +570,7 @@ void conditional_t<T>::set_days_since( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_is_season( JsonObject &jo )
+void conditional_t<T>::set_is_season( const JsonObject &jo )
 {
     std::string season_name = jo.get_string( "is_season" );
     condition = [season_name]( const T & ) {
@@ -562,7 +583,7 @@ void conditional_t<T>::set_is_season( JsonObject &jo )
 }
 
 template<class T>
-void conditional_t<T>::set_mission_goal( JsonObject &jo )
+void conditional_t<T>::set_mission_goal( const JsonObject &jo )
 {
     std::string mission_goal_str = jo.get_string( "mission_goal" );
     condition = [mission_goal_str]( const T & d ) {
@@ -755,18 +776,15 @@ void conditional_t<T>::set_is_driving( bool is_npc )
 }
 
 template<class T>
-void conditional_t<T>::set_has_stolen_item( bool is_npc )
+void conditional_t<T>::set_has_stolen_item( bool /*is_npc*/ )
 {
-    ( void )is_npc;
     condition = []( const T & d ) {
         player *actor = d.alpha;
         npc &p = *d.beta;
         bool found_in_inv = false;
         for( auto &elem : actor->inv_dump() ) {
-            if( elem->get_old_owner() ) {
-                if( elem->get_old_owner() == p.get_faction() ) {
-                    found_in_inv = true;
-                }
+            if( elem->is_old_owner( p, true ) ) {
+                found_in_inv = true;
             }
         }
         return found_in_inv;
@@ -823,7 +841,7 @@ void conditional_t<T>::set_has_reason()
 }
 
 template<class T>
-void conditional_t<T>::set_has_skill( JsonObject &jo, const std::string &member, bool is_npc )
+void conditional_t<T>::set_has_skill( const JsonObject &jo, const std::string &member, bool is_npc )
 {
     JsonObject has_skill = jo.get_object( member );
     if( !has_skill.has_string( "skill" ) || !has_skill.has_int( "level" ) ) {
@@ -844,7 +862,7 @@ void conditional_t<T>::set_has_skill( JsonObject &jo, const std::string &member,
 }
 
 template<class T>
-void conditional_t<T>::set_u_know_recipe( JsonObject &jo, const std::string &member )
+void conditional_t<T>::set_u_know_recipe( const JsonObject &jo, const std::string &member )
 {
     const std::string &known_recipe_id = jo.get_string( member );
     condition = [known_recipe_id]( const T & d ) {
@@ -868,23 +886,21 @@ void conditional_t<T>::set_mission_has_generic_rewards()
 }
 
 template<class T>
-conditional_t<T>::conditional_t( JsonObject jo )
+conditional_t<T>::conditional_t( const JsonObject &jo )
 {
     // improve the clarity of NPC setter functions
     const bool is_npc = true;
     bool found_sub_member = false;
-    const auto parse_array = []( JsonObject jo, const std::string & type ) {
+    const auto parse_array = []( const JsonObject & jo, const std::string & type ) {
         std::vector<conditional_t> conditionals;
-        JsonArray ja = jo.get_array( type );
-        while( ja.has_more() ) {
-            if( ja.test_string() ) {
-                conditional_t<T> type_condition( ja.next_string() );
-                conditionals.emplace_back( type_condition );
-            } else if( ja.test_object() ) {
-                conditional_t<T> type_condition( ja.next_object() );
+        for( const JsonValue entry : jo.get_array( type ) ) {
+            if( entry.test_string() ) {
+                conditional_t<T> type_condition( entry.get_string() );
                 conditionals.emplace_back( type_condition );
             } else {
-                ja.skip_value();
+                JsonObject cond = entry.get_object();
+                conditional_t<T> type_condition( cond );
+                conditionals.emplace_back( type_condition );
             }
         }
         return conditionals;
@@ -912,7 +928,8 @@ conditional_t<T>::conditional_t( JsonObject jo )
             return false;
         };
     } else if( jo.has_object( "not" ) ) {
-        const conditional_t<T> sub_condition = conditional_t<T>( jo.get_object( "not" ) );
+        JsonObject cond = jo.get_object( "not" );
+        const conditional_t<T> sub_condition = conditional_t<T>( cond );
         found_sub_member = true;
         condition = [sub_condition]( const T & d ) {
             return !sub_condition( d );
@@ -948,6 +965,8 @@ conditional_t<T>::conditional_t( JsonObject jo )
         set_npc_has_class( jo );
     } else if( jo.has_string( "npc_has_activity" ) ) {
         set_has_activity( is_npc );
+    } else if( jo.has_string( "npc_is_riding" ) ) {
+        set_is_riding( is_npc );
     } else if( jo.has_string( "u_has_mission" ) ) {
         set_u_has_mission( jo );
     } else if( jo.has_int( "u_has_strength" ) ) {
@@ -1010,7 +1029,7 @@ conditional_t<T>::conditional_t( JsonObject jo )
         set_npc_role_nearby( jo );
     } else if( jo.has_int( "npc_allies" ) ) {
         set_npc_allies( jo );
-    } else if( jo.has_int( "npc_service" ) ) {
+    } else if( jo.get_bool( "npc_service", false ) ) {
         set_npc_available();
     } else if( jo.has_int( "u_has_cash" ) ) {
         set_u_has_cash( jo );
@@ -1113,6 +1132,8 @@ conditional_t<T>::conditional_t( const std::string &type )
         set_is_driving( is_npc );
     } else if( type == "npc_has_activity" ) {
         set_has_activity( is_npc );
+    } else if( type == "npc_is_riding" ) {
+        set_is_riding( is_npc );
     } else if( type == "is_day" ) {
         set_is_day();
     } else if( type == "u_has_stolen_item" ) {
@@ -1137,8 +1158,11 @@ conditional_t<T>::conditional_t( const std::string &type )
 }
 
 template struct conditional_t<dialogue>;
-template void read_condition<dialogue>( JsonObject &jo, const std::string &member_name,
+template void read_condition<dialogue>( const JsonObject &jo, const std::string &member_name,
                                         std::function<bool( const dialogue & )> &condition, bool default_val );
-template void read_condition<mission_goal_condition_context>( JsonObject &jo,
+#if !defined(MACOSX)
+template struct conditional_t<mission_goal_condition_context>;
+#endif
+template void read_condition<mission_goal_condition_context>( const JsonObject &jo,
         const std::string &member_name,
         std::function<bool( const mission_goal_condition_context & )> &condition, bool default_val );

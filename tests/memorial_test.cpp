@@ -42,7 +42,7 @@ TEST_CASE( "memorials" )
 {
     memorial_logger &m = g->memorial();
     m.clear();
-    clear_player();
+    clear_avatar();
 
     event_bus &b = g->events();
 
@@ -92,7 +92,7 @@ TEST_CASE( "memorials" )
         "afterwards.", ch, ch2, "victim_name" );
 
     check_memorial<event_type::character_kills_monster>(
-        m, b, "Killed a kevlar hulk.", ch, mon );
+        m, b, "Killed a Kevlar hulk.", ch, mon );
 
     check_memorial<event_type::character_loses_effect>(
         m, b, "Put out the fire.", ch, eff );
@@ -101,7 +101,7 @@ TEST_CASE( "memorials" )
         m, b, "Fell in a pit.", ch, trap_str_id( "tr_pit" ) );
 
     check_memorial<event_type::consumes_marloss_item>(
-        m, b, "Consumed a marloss seed.", ch, it );
+        m, b, "Consumed a Marloss seed.", ch, it );
 
     check_memorial<event_type::crosses_marloss_threshold>(
         m, b, "Opened the Marloss Gateway.", ch );
@@ -176,16 +176,13 @@ TEST_CASE( "memorials" )
         m, b, u_name + " was killed.\nLast words: last_words", false, "last_words" );
 
     check_memorial<event_type::game_start>(
-        m, b, u_name + " began their journey into the Cataclysm." );
+        m, b, u_name + " began their journey into the Cataclysm.", ch );
 
     check_memorial<event_type::installs_cbm>(
         m, b, "Installed bionic: Alarm System.", ch, cbm );
 
     check_memorial<event_type::installs_faulty_cbm>(
         m, b, "Installed bad bionic: Alarm System.", ch, cbm );
-
-    check_memorial<event_type::launches_nuke>(
-        m, b, "Launched a nuke at a garage.", oter_id( "s_garage_north" ) );
 
     check_memorial<event_type::learns_martial_art>(
         m, b, "Learned Aikido.", ch, matype_id( "style_aikido" ) );
@@ -201,6 +198,9 @@ TEST_CASE( "memorials" )
 
     check_memorial<event_type::opens_temple>(
         m, b, "Opened a strange temple." );
+
+    check_memorial<event_type::player_levels_spell>(
+        m, b, "Gained a spell level on Pain.", spell_id( "pain_damage" ), 5 );
 
     check_memorial<event_type::releases_subspace_specimens>(
         m, b, "Released subspace specimens." );

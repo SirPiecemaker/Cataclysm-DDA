@@ -4,7 +4,6 @@
 
 #include <cstddef>
 #include <map>
-#include <sstream>
 #include <vector>
 #include <functional>
 #include <string>
@@ -25,7 +24,7 @@ class vpart_info;
 enum task_reason {
     UNKNOWN_TASK = -1, //No such task
     CAN_DO, //Task can be done
-    INVALID_TARGET, //No valid target ie can't "change tire" if no tire present
+    INVALID_TARGET, //No valid target i.e. can't "change tire" if no tire present
     LACK_TOOLS, //Player doesn't have all the tools they need
     NOT_FREE, //Part is attached to something else and can't be unmounted
     LACK_SKILL, //Player doesn't have high enough mechanics skill
@@ -68,7 +67,8 @@ class veh_interact
         int overview_limit = 0;
 
         const vpart_info *sel_vpart_info = nullptr;
-        char sel_cmd = ' '; //Command currently being run by the player
+        //Command currently being run by the player
+        char sel_cmd = ' ';
 
         const vehicle_part *sel_vehicle_part = nullptr;
 
@@ -89,21 +89,20 @@ class veh_interact
         catacurses::window w_owner;
 
         vehicle *veh;
-        bool has_wrench;
-        bool has_jack;
-        bool has_wheel;
         inventory crafting_inv;
         input_context main_context;
 
-        int max_lift; // maximum level of available lifting equipment (if any)
-        int max_jack; // maximum level of available jacking equipment (if any)
+        // maximum level of available lifting equipment (if any)
+        int max_lift;
+        // maximum level of available jacking equipment (if any)
+        int max_jack;
 
         player_activity serialize_activity();
 
         void set_title( const std::string &msg ) const;
 
         /** Format list of requirements returning true if all are met */
-        bool format_reqs( std::ostringstream &msg, const requirement_data &reqs,
+        bool format_reqs( std::string &msg, const requirement_data &reqs,
                           const std::map<skill_id, int> &skills, int moves ) const;
 
         int part_at( const point &d );
@@ -139,7 +138,6 @@ class veh_interact
         bool do_rename( std::string &msg );
         bool do_siphon( std::string &msg );
         bool do_unload( std::string &msg );
-        bool do_tirechange( std::string &msg );
         bool do_assign_crew( std::string &msg );
         bool do_relabel( std::string &msg );
         /*@}*/

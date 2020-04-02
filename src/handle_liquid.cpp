@@ -1,7 +1,7 @@
 #include "handle_liquid.h"
 
-#include <limits.h>
-#include <stddef.h>
+#include <climits>
+#include <cstddef>
 #include <algorithm>
 #include <functional>
 #include <iterator>
@@ -160,21 +160,30 @@ static bool get_liquid_target( item &liquid, item *const source, const int radiu
 
     const std::string liquid_name = liquid.display_name( liquid.charges );
     if( source_pos != nullptr ) {
-        menu.text = string_format( _( "What to do with the %s from %s?" ), liquid_name,
+        //~ %1$s: liquid name, %2$s: terrain name
+        menu.text = string_format( pgettext( "liquid", "What to do with the %1$s from %2$s?" ), liquid_name,
                                    g->m.name( *source_pos ) );
     } else if( source_veh != nullptr ) {
-        menu.text = string_format( _( "What to do with the %s from the %s?" ), liquid_name,
-                                   source_veh->name );
+        //~ %1$s: liquid name, %2$s: vehicle name
+        menu.text = string_format( pgettext( "liquid", "What to do with the %1$s from %2$s?" ), liquid_name,
+                                   source_veh->disp_name() );
     } else if( source_mon != nullptr ) {
-        menu.text = string_format( _( "What to do with the %s from the %s?" ), liquid_name,
-                                   source_mon->get_name() );
+        //~ %1$s: liquid name, %2$s: monster name
+        menu.text = string_format( pgettext( "liquid", "What to do with the %1$s from the %2$s?" ),
+                                   liquid_name, source_mon->get_name() );
     } else {
-        menu.text = string_format( _( "What to do with the %s?" ), liquid_name );
+        //~ %s: liquid name
+        menu.text = string_format( pgettext( "liquid", "What to do with the %s?" ), liquid_name );
     }
     std::vector<std::function<void()>> actions;
 
     if( g->u.can_consume( liquid ) && !source_mon ) {
-        menu.addentry( -1, true, 'e', _( "Consume it" ) );
+        if( g->u.can_consume_for_bionic( liquid ) ) {
+            menu.addentry( -1, true, 'e', _( "Fuel bionic with it" ) );
+        } else {
+            menu.addentry( -1, true, 'e', _( "Consume it" ) );
+        }
+
         actions.emplace_back( [&]() {
             target.dest_opt = LD_CONSUME;
         } );
@@ -189,7 +198,9 @@ static bool get_liquid_target( item &liquid, item *const source, const int radiu
             add_msg( _( "Never mind." ) );
             return;
         }
-        if( source != nullptr && cont == source ) {
+        // Sometimes the cont parameter is omitted, but the liquid is still within a container that counts
+        // as valid target for the liquid. So check for that.
+        if( cont == source || ( !cont->contents.empty() && &cont->contents.front() == &liquid ) ) {
             add_msg( m_info, _( "That's the same container!" ) );
             return; // The user has intended to do something, but mistyped.
         }

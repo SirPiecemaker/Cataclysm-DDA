@@ -12,11 +12,12 @@
 #include "mapdata.h"
 #include "output.h"
 #include "string_formatter.h"
+#include "ui_manager.h"
 #include "color.h"
 #include "translations.h"
 #include "string_id.h"
 
-const skill_id skill_survival( "survival" );
+static const skill_id skill_survival( "survival" );
 
 static const trait_id trait_ILLITERATE( "ILLITERATE" );
 
@@ -47,8 +48,8 @@ void game::extended_description( const tripoint &p )
     catacurses::window w_head = catacurses::newwin( top, TERMX, point_zero );
     catacurses::window w_main = catacurses::newwin( height, width, point( left, top ) );
     // TODO: De-hardcode
-    std::string header_message = _( "\
-c to describe creatures, f to describe furniture, t to describe terrain, Esc/Enter to close." );
+    std::string header_message =
+        _( "c to describe creatures, f to describe furniture, t to describe terrain, Esc/Enter to close." );
     mvwprintz( w_head, point_zero, c_white, header_message );
 
     // Set up line drawings
@@ -65,6 +66,10 @@ c to describe creatures, f to describe furniture, t to describe terrain, Esc/Ent
         cur_target = description_target::furniture;
     }
     int ch = 'c';
+
+    // FIXME: temporarily disable redrawing of lower UIs before this UI is migrated to `ui_adaptor`
+    ui_adaptor ui( ui_adaptor::disable_uis_below {} );
+
     do {
         std::string desc;
         // Allow looking at invisible tiles - player may want to examine hallucinations etc.
@@ -98,6 +103,7 @@ c to describe creatures, f to describe furniture, t to describe terrain, Esc/Ent
 
         std::string signage = m.get_signage( p );
         if( !signage.empty() ) {
+            // NOLINTNEXTLINE(cata-text-style): the question mark does not end a sentence
             desc += u.has_trait( trait_ILLITERATE ) ? _( "\nSign: ???" ) : string_format( _( "\nSign: %s" ),
                     signage );
         }

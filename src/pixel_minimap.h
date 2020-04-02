@@ -2,14 +2,13 @@
 #ifndef MINIMAP_H
 #define MINIMAP_H
 
-
 #include <map>
 #include <memory>
 
-#include "pixel_minimap_projectors.h"
 #include "point.h"
 #include "sdl_wrappers.h"
 
+class pixel_minimap_projector;
 
 enum class pixel_minimap_type {
     ortho,

@@ -45,7 +45,7 @@ static const std::map<std::string, float> activity_levels = {
     { "EXTRA_EXERCISE", EXTRA_EXERCISE }
 };
 
-void activity_type::load( JsonObject &jo )
+void activity_type::load( const JsonObject &jo )
 {
     activity_type result;
 
@@ -54,11 +54,12 @@ void activity_type::load( JsonObject &jo )
     assign( jo, "verb", result.verb_, true );
     assign( jo, "suspendable", result.suspendable_, true );
     assign( jo, "no_resume", result.no_resume_, true );
+    assign( jo, "multi_activity", result.multi_activity_, false );
     assign( jo, "refuel_fires", result.refuel_fires, false );
 
     std::string activity_level = jo.get_string( "activity_level", "" );
     if( activity_level.empty() ) {
-        debugmsg( "Warning. %s has undefined activity level. defaulting to LIGHT_EXERCISE",
+        debugmsg( "Warning.  %s has undefined activity level.  defaulting to LIGHT_EXERCISE",
                   result.id().c_str() );
         activity_level = "LIGHT_EXERCISE";
     }
@@ -116,7 +117,8 @@ bool activity_type::call_finish( player_activity *act, player *p ) const
     const auto &pair = activity_handlers::finish_functions.find( id_ );
     if( pair != activity_handlers::finish_functions.end() ) {
         pair->second( act, p );
-        sfx::end_activity_sounds(); // kill activity sounds at finish
+        // kill activity sounds at finish
+        sfx::end_activity_sounds();
         return true;
     }
     return false;

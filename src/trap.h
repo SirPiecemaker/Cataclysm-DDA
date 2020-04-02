@@ -10,6 +10,7 @@
 
 #include "color.h"
 #include "int_id.h"
+#include "magic.h"
 #include "string_id.h"
 #include "translations.h"
 #include "type_id.h"
@@ -59,8 +60,10 @@ bool temple_toggle( const tripoint &p, Creature *c, item *i );
 bool glow( const tripoint &p, Creature *c, item *i );
 bool hum( const tripoint &p, Creature *c, item *i );
 bool shadow( const tripoint &p, Creature *c, item *i );
+bool map_regen( const tripoint &p, Creature *c, item *i );
 bool drain( const tripoint &p, Creature *c, item *i );
 bool snake( const tripoint &p, Creature *c, item *i );
+bool cast_spell( const tripoint &p, Creature *critter, item * );
 } // namespace trapfunc
 
 struct vehicle_handle_trap_data {
@@ -90,15 +93,21 @@ struct trap {
 
         bool was_loaded = false;
 
-        int sym;
+        int sym = 0;
         nc_color color;
     private:
-        int visibility = 1; // 1 to ??, affects detection
-        int avoidance = 0;  // 0 to ??, affects avoidance
-        int difficulty = 0; // 0 to ??, difficulty of assembly & disassembly
-        int trap_radius = 0;// 0 to ??, trap radius
+        // 1 to ??, affects detection
+        int visibility = 1;
+        // 0 to ??, affects avoidance
+        int avoidance = 0;
+        // 0 to ??, difficulty of assembly & disassembly
+        int difficulty = 0;
+        // 0 to ??, trap radius
+        int trap_radius = 0;
         bool benign = false;
         bool always_invisible = false;
+        // a valid overmap id, for map_regen action traps
+        std::string map_regen;
         trap_function act;
         std::string name_;
         /**
@@ -106,8 +115,11 @@ struct trap {
          */
         units::mass trigger_weight = units::mass( -1, units::mass::unit_type{} );
         int funnel_radius_mm = 0;
-        std::vector<std::tuple<std::string, int, int>> components; // For disassembly?
+        // For disassembly?
+        std::vector<std::tuple<std::string, int, int>> components;
     public:
+        // data required for trapfunc::spell()
+        fake_spell spell_data;
         int comfort = 0;
         int floor_bedding_warmth = 0;
     public:
@@ -125,6 +137,9 @@ struct trap {
         int get_visibility() const {
             return visibility;
         }
+
+        std::string  map_regen_target() const;
+
         /**
          * Whether triggering the trap can be avoid (if greater than 0) and if so, this is
          * compared to dodge skill (with some adjustments). Smaller values means it's easier
@@ -189,7 +204,7 @@ struct trap {
         /**
          * Loads this specific trap.
          */
-        void load( JsonObject &jo, const std::string &src );
+        void load( const JsonObject &jo, const std::string &src );
 
         /*@{*/
         /**
@@ -218,9 +233,9 @@ struct trap {
          */
         /**
          * Loads the trap and adds it to the trapmap, and the traplist.
-         * @throw std::string if the json is invalid as usual.
+         * @throw JsonError if the json is invalid as usual.
          */
-        static void load_trap( JsonObject &jo, const std::string &src );
+        static void load_trap( const JsonObject &jo, const std::string &src );
         /**
          * Releases the loaded trap objects in trapmap and traplist.
          */

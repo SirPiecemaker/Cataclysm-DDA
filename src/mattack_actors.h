@@ -38,9 +38,9 @@ class leap_actor : public mattack_actor
         leap_actor() = default;
         ~leap_actor() override = default;
 
-        void load_internal( JsonObject &obj, const std::string &src ) override;
+        void load_internal( const JsonObject &obj, const std::string &src ) override;
         bool call( monster & ) const override;
-        mattack_actor *clone() const override;
+        std::unique_ptr<mattack_actor> clone() const override;
 };
 
 class mon_spellcasting_actor : public mattack_actor
@@ -54,9 +54,9 @@ class mon_spellcasting_actor : public mattack_actor
         mon_spellcasting_actor() = default;
         ~mon_spellcasting_actor() override = default;
 
-        void load_internal( JsonObject &obj, const std::string &src ) override;
+        void load_internal( const JsonObject &obj, const std::string &src ) override;
         bool call( monster & ) const override;
-        mattack_actor *clone() const override;
+        std::unique_ptr<mattack_actor> clone() const override;
 };
 
 class melee_actor : public mattack_actor
@@ -104,16 +104,16 @@ class melee_actor : public mattack_actor
         virtual Creature *find_target( monster &z ) const;
         virtual void on_damage( monster &z, Creature &target, dealt_damage_instance &dealt ) const;
 
-        void load_internal( JsonObject &obj, const std::string &src ) override;
+        void load_internal( const JsonObject &obj, const std::string &src ) override;
         bool call( monster & ) const override;
-        mattack_actor *clone() const override;
+        std::unique_ptr<mattack_actor> clone() const override;
 };
 
 class bite_actor : public melee_actor
 {
     public:
         // one_in( this - damage dealt ) chance of getting infected
-        // ie. the higher is this, the lower chance of infection
+        // i.e. the higher is this, the lower chance of infection
         int no_infection_chance;
 
         bite_actor();
@@ -121,8 +121,8 @@ class bite_actor : public melee_actor
 
         void on_damage( monster &z, Creature &target, dealt_damage_instance &dealt ) const override;
 
-        void load_internal( JsonObject &obj, const std::string &src ) override;
-        mattack_actor *clone() const override;
+        void load_internal( const JsonObject &obj, const std::string &src ) override;
+        std::unique_ptr<mattack_actor> clone() const override;
 };
 
 class gun_actor : public mattack_actor
@@ -186,9 +186,9 @@ class gun_actor : public mattack_actor
         gun_actor();
         ~gun_actor() override = default;
 
-        void load_internal( JsonObject &obj, const std::string &src ) override;
+        void load_internal( const JsonObject &obj, const std::string &src ) override;
         bool call( monster & ) const override;
-        mattack_actor *clone() const override;
+        std::unique_ptr<mattack_actor> clone() const override;
 };
 
 #endif

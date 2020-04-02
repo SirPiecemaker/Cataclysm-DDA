@@ -14,11 +14,11 @@
 /cmake-build-debug/
 /config/
 /data/*.template
-/data/font/
 /data/mods/user-default-mods.json
 /dep/
 /doxygen_doc/html/*
 /doxygen_doc/latex/*
+/font/
 /graveyard/
 /memorial/
 /mods/
@@ -87,6 +87,9 @@ Thumbs.db
 cscope.*
 tags
 
+# Generated translation source
+/lang/po/en.po
+
 # Compiled binary translations
 /lang/mo/
 
@@ -104,6 +107,7 @@ nbproject/
 *.vim
 *.session
 .ycm_extra_conf.py
+.vimrc
 
 # taskwarrior files
 *.task*

@@ -18,6 +18,7 @@
 #include "options.h"
 #include "output.h"
 #include "translations.h"
+#include "ui_manager.h"
 #include "color.h"
 #include "enums.h"
 
@@ -25,6 +26,19 @@ static const efftype_id effect_cold( "cold" );
 static const efftype_id effect_hot( "hot" );
 static const efftype_id effect_took_prozac( "took_prozac" );
 static const efftype_id effect_took_prozac_bad( "took_prozac_bad" );
+
+static const trait_id trait_BADTEMPER( "BADTEMPER" );
+static const trait_id trait_CENOBITE( "CENOBITE" );
+static const trait_id trait_FLOWERS( "FLOWERS" );
+static const trait_id trait_LEAVES2( "LEAVES2" );
+static const trait_id trait_LEAVES3( "LEAVES3" );
+static const trait_id trait_MASOCHIST( "MASOCHIST" );
+static const trait_id trait_MASOCHIST_MED( "MASOCHIST_MED" );
+static const trait_id trait_OPTIMISTIC( "OPTIMISTIC" );
+static const trait_id trait_ROOTS1( "ROOTS1" );
+static const trait_id trait_ROOTS2( "ROOTS2" );
+static const trait_id trait_ROOTS3( "ROOTS3" );
+static const trait_id trait_STYLISH( "STYLISH" );
 
 namespace
 {
@@ -175,8 +189,8 @@ void player_morale::morale_point::add( const int new_bonus, const int new_max_bo
     age = 0_turns; // Brand new. The assignment should stay below get_net_bonus() and pick_time().
 }
 
-time_duration player_morale::morale_point::pick_time( const time_duration current_time,
-        const time_duration new_time, bool same_sign ) const
+time_duration player_morale::morale_point::pick_time( const time_duration &current_time,
+        const time_duration &new_time, bool same_sign ) const
 {
     const time_duration remaining_time = current_time - age;
     return ( remaining_time <= new_time && same_sign ) ? new_time : remaining_time;
@@ -191,7 +205,7 @@ double player_morale::morale_point::get_percent_contribution()
 {
     return percent_contribution;
 }
-void player_morale::morale_point::decay( const time_duration ticks )
+void player_morale::morale_point::decay( const time_duration &ticks )
 {
     if( ticks < 0_turns ) {
         debugmsg( "The function called with negative ticks %d.", to_turns<int>( ticks ) );
@@ -246,28 +260,28 @@ player_morale::player_morale() :
     const auto update_constrained = std::bind( &player_morale::update_constrained_penalty, _1 );
     const auto update_masochist   = std::bind( &player_morale::update_masochist_bonus, _1 );
 
-    mutations[trait_id( "OPTIMISTIC" )]    = mutation_data(
-                std::bind( set_optimist, _1, 9 ),
-                std::bind( set_optimist, _1, 0 ) );
-    mutations[trait_id( "BADTEMPER" )]     = mutation_data(
-                std::bind( set_badtemper, _1, -9 ),
-                std::bind( set_badtemper, _1, 0 ) );
-    mutations[trait_id( "STYLISH" )]       = mutation_data(
-                std::bind( set_stylish, _1, true ),
-                std::bind( set_stylish, _1, false ) );
-    mutations[trait_id( "FLOWERS" )]       = mutation_data( update_constrained );
-    mutations[trait_id( "ROOTS1" )]         = mutation_data( update_constrained );
-    mutations[trait_id( "ROOTS2" )]        = mutation_data( update_constrained );
-    mutations[trait_id( "ROOTS3" )]        = mutation_data( update_constrained );
-    mutations[trait_id( "LEAVES2" )]       = mutation_data( update_constrained );
-    mutations[trait_id( "LEAVES3" )]       = mutation_data( update_constrained );
-    mutations[trait_id( "MASOCHIST" )]     = mutation_data( update_masochist );
-    mutations[trait_id( "MASOCHIST_MED" )] = mutation_data( update_masochist );
-    mutations[trait_id( "CENOBITE" )]      = mutation_data( update_masochist );
+    mutations[trait_OPTIMISTIC]    = mutation_data(
+                                         std::bind( set_optimist, _1, 9 ),
+                                         std::bind( set_optimist, _1, 0 ) );
+    mutations[trait_BADTEMPER]     = mutation_data(
+                                         std::bind( set_badtemper, _1, -9 ),
+                                         std::bind( set_badtemper, _1, 0 ) );
+    mutations[trait_STYLISH]       = mutation_data(
+                                         std::bind( set_stylish, _1, true ),
+                                         std::bind( set_stylish, _1, false ) );
+    mutations[trait_FLOWERS]       = mutation_data( update_constrained );
+    mutations[trait_ROOTS1]         = mutation_data( update_constrained );
+    mutations[trait_ROOTS2]        = mutation_data( update_constrained );
+    mutations[trait_ROOTS3]        = mutation_data( update_constrained );
+    mutations[trait_LEAVES2]       = mutation_data( update_constrained );
+    mutations[trait_LEAVES3]       = mutation_data( update_constrained );
+    mutations[trait_MASOCHIST]     = mutation_data( update_masochist );
+    mutations[trait_MASOCHIST_MED] = mutation_data( update_masochist );
+    mutations[trait_CENOBITE]      = mutation_data( update_masochist );
 }
 
 void player_morale::add( morale_type type, int bonus, int max_bonus,
-                         const time_duration duration, const time_duration decay_start,
+                         const time_duration &duration, const time_duration &decay_start,
                          bool capped, const itype *item_type )
 {
     if( ( duration == 0_turns ) & !is_permanent_morale( type ) ) {
@@ -439,9 +453,9 @@ int player_morale::get_level() const
     return level;
 }
 
-void player_morale::decay( const time_duration ticks )
+void player_morale::decay( const time_duration &ticks )
 {
-    const auto do_decay = [ ticks ]( morale_point & m ) {
+    const auto do_decay = [ &ticks ]( morale_point & m ) {
         m.decay( ticks );
     };
 
@@ -451,7 +465,7 @@ void player_morale::decay( const time_duration ticks )
     invalidate();
 }
 
-void player_morale::display( int focus_eq )
+void player_morale::display( int focus_eq, int pain_penalty, int fatigue_penalty )
 {
     /*calculates the percent contributions of the morale points,
      * must be done before anything else in this method
@@ -459,6 +473,8 @@ void player_morale::display( int focus_eq )
     calculate_percentage();
 
     const char *morale_gain_caption = _( "Total morale:" );
+    const char *pain_caption = _( "Pain level:" );
+    const char *fatigue_caption = _( "Fatigue level:" );
     const char *focus_equilibrium = _( "Focus trends towards:" );
     const char *points_is_empty = _( "Nothing affects your morale" );
 
@@ -508,7 +524,17 @@ void player_morale::display( int focus_eq )
 
     int offset = 0;
     int rows_total = points.size();
-    int rows_visible = std::max( win_h - 8, 0 );
+    int penalty_rows = 0;
+    if( pain_penalty != 0 ) {
+        penalty_rows++;
+    }
+    if( fatigue_penalty != 0 ) {
+        penalty_rows++;
+    }
+    int rows_visible = std::max( win_h - 8 - penalty_rows, 0 );
+
+    // FIXME: temporarily disable redrawing of lower UIs before this UI is migrated to `ui_adaptor`
+    ui_adaptor ui( ui_adaptor::disable_uis_below {} );
 
     for( ;; ) {
 
@@ -523,9 +549,9 @@ void player_morale::display( int focus_eq )
         mvwhline( w, point( 1, 2 ), 0, win_w - 2 );
         mvwhline( w, point( win_w - 1, 2 ), LINE_XOXX, 1 );
 
-        mvwhline( w, point( 0, win_h - 4 ), LINE_XXXO, 1 );
-        mvwhline( w, point( 1, win_h - 4 ), 0, win_w - 2 );
-        mvwhline( w, point( win_w - 1, win_h - 4 ), LINE_XOXX, 1 );
+        mvwhline( w, point( 0, win_h - 4 - penalty_rows ), LINE_XXXO, 1 );
+        mvwhline( w, point( 1, win_h - 4 - penalty_rows ), 0, win_w - 2 );
+        mvwhline( w, point( win_w - 1, win_h - 4 - penalty_rows ), LINE_XOXX, 1 );
 
         if( !points.empty() ) {
             const char *source_column = _( "Source" );
@@ -572,7 +598,13 @@ void player_morale::display( int focus_eq )
             fold_and_print_from( w, point( 2, 3 ), win_w - 4, 0, c_dark_gray, points_is_empty );
         }
 
-        print_line( win_h - 3, morale_gain_caption, get_level() );
+        print_line( win_h - 3 - penalty_rows, morale_gain_caption, get_level() );
+        if( pain_penalty != 0 ) {
+            print_line( win_h - 2 - penalty_rows, pain_caption, -pain_penalty, false, c_light_red );
+        }
+        if( fatigue_penalty != 0 ) {
+            print_line( win_h - 3, fatigue_caption, -fatigue_penalty, false, c_light_red );
+        }
         //manual line as lambda will not do it properly here
         mvwprintz( w, point( getmaxx( w ) - 8, win_h - 2 ), c_white, "%d", focus_eq );
         fold_and_print_from( w, point( 2, win_h - 2 ), getmaxx( w ) - 9, 0, c_white, focus_equilibrium );
@@ -838,9 +870,9 @@ void player_morale::update_stylish_bonus()
 
 void player_morale::update_masochist_bonus()
 {
-    const bool amateur_masochist = has_mutation( trait_id( "MASOCHIST" ) );
-    const bool advanced_masochist = has_mutation( trait_id( "MASOCHIST_MED" ) ) ||
-                                    has_mutation( trait_id( "CENOBITE" ) );
+    const bool amateur_masochist = has_mutation( trait_MASOCHIST );
+    const bool advanced_masochist = has_mutation( trait_MASOCHIST_MED ) ||
+                                    has_mutation( trait_CENOBITE );
     const bool any_masochist = amateur_masochist || advanced_masochist;
 
     int bonus = 0;
@@ -895,15 +927,15 @@ void player_morale::update_constrained_penalty()
     };
     int pen = 0;
 
-    if( has_mutation( trait_id( "FLOWERS" ) ) ) {
+    if( has_mutation( trait_FLOWERS ) ) {
         pen += bp_pen( bp_head, 10 );
     }
-    if( has_mutation( trait_id( "ROOTS1" ) ) || has_mutation( trait_id( "ROOTS2" ) ) ||
-        has_mutation( trait_id( "ROOTS3" ) ) ) {
+    if( has_mutation( trait_ROOTS1 ) || has_mutation( trait_ROOTS2 ) ||
+        has_mutation( trait_ROOTS3 ) ) {
         pen += bp_pen( bp_foot_l, 5 );
         pen += bp_pen( bp_foot_r, 5 );
     }
-    if( has_mutation( trait_id( "LEAVES2" ) ) || has_mutation( trait_id( "LEAVES3" ) ) ) {
+    if( has_mutation( trait_LEAVES2 ) || has_mutation( trait_LEAVES3 ) ) {
         pen += bp_pen( bp_arm_l, 5 );
         pen += bp_pen( bp_arm_r, 5 );
     }

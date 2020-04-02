@@ -17,6 +17,7 @@
 #include "avatar.h"
 #include "map_extras.h"
 #include "generic_factory.h"
+#include "ui_manager.h"
 
 namespace auto_notes
 {
@@ -149,7 +150,7 @@ auto_note_manager_gui::auto_note_manager_gui()
 
     for( auto &extra : MapExtras::mapExtraFactory().get_all() ) {
         // Ignore all extras that have autonote disabled in the JSON.
-        // This filters out lots of extras users shouldnt see (like "normal")
+        // This filters out lots of extras users shouldn't see (like "normal")
         if( !extra.autonote ) {
             continue;
         }
@@ -206,9 +207,7 @@ void auto_note_manager_gui::show()
     int tmpx = 0;
     tmpx += shortcut_print( w_header, point( tmpx, 0 ), c_white, c_light_green, _( "<E>nable" ) ) + 2;
     tmpx += shortcut_print( w_header, point( tmpx, 0 ), c_white, c_light_green, _( "<D>isable" ) ) + 2;
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    tmpx += shortcut_print( w_header, point( tmpx, 0 ), c_white, c_light_green,
-                            _( "<Enter> - Toggle" ) ) + 2;
+    shortcut_print( w_header, point( tmpx, 0 ), c_white, c_light_green, _( "<Enter> - Toggle" ) );
 
     // Draw horizontal line and corner pieces of the table
     for( int x = 0; x < 78; x++ ) {
@@ -248,6 +247,9 @@ void auto_note_manager_gui::show()
         ctx.register_action( "DISABLE_MAPEXTRA_NOTE" );
     }
 
+    // FIXME: temporarily disable redrawing of lower UIs before this UI is migrated to `ui_adaptor`
+    ui_adaptor ui( ui_adaptor::disable_uis_below {} );
+
     while( true ) {
         mvwprintz( w_header, point( 39, 0 ), c_white, _( "Auto notes enabled:" ) );
 
@@ -257,10 +259,7 @@ void auto_note_manager_gui::show()
                                     get_option<bool>( "AUTO_NOTES" ) ? _( "True" ) : _( "False" ) );
 
         currentX += shortcut_print( w_header, point( currentX, 0 ), c_white, c_light_green, "  " );
-        // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-        currentX += shortcut_print( w_header, point( currentX, 0 ), c_white, c_light_green,
-                                    _( "<S>witch " ) );
-
+        shortcut_print( w_header, point( currentX, 0 ), c_white, c_light_green, _( "<S>witch " ) );
 
         // Clear table
         for( int y = 0; y < iContentHeight; y++ ) {
@@ -302,7 +301,7 @@ void auto_note_manager_gui::show()
                     wprintz( w, c_yellow, "   " );
                 }
 
-                wprintz( w, lineColor, "%s", cacheEntry.first.name );
+                wprintz( w, lineColor, "%s", _( cacheEntry.first.name ) );
 
                 // Since yes is longer than no, we need to clear the space for the status string before
                 // displaying the current text. Otherwise artifacts might occur.
